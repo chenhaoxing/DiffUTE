@@ -17,7 +17,7 @@ If you use DiffUTE in your research or wish to refer to the baseline results pub
 }
 ```
 ## Acknowledgement
-Many thanks to the nice work of [diffusers]([https://github.com/ShoufaChen](https://github.com/huggingface/diffusers)).
+Many thanks to the nice work of [diffusers](https://github.com/huggingface/diffusers).
 
 ## Contacts
 Please feel free to contact us if you have any problems.
