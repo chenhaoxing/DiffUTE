@@ -12,7 +12,7 @@ If you use DiffUTE in your research or wish to refer to the baseline results pub
 @article{DiffUTE,
       title={DiffUTE: Universal Text Editing Diffusion Model},
       author={Chen, Haoxing and Xu, Zhuoer and Gu, Zhangxuan and Lan, Jun and Zheng, Xing and Li, Yaohui and Meng, Changhua and Zhu, Huijia and Wang, Weiqiang},
-      journal={arXiv preprint arXiv:xxx},
+      journal={arXiv preprint arXiv:2305.10825},
       year={2023}
 }
 ```
