@@ -50,6 +50,8 @@ accelerate launch train_diffute.py \
   --checkpointing_steps=10000
 ```
 
+## Experimental results
+
 ## Citing DiffUTE
 
 If you use DiffUTE in your research or wish to refer to the baseline results published here, please use the following BibTeX entry.
