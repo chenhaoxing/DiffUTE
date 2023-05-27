@@ -1,6 +1,6 @@
 # DiffUTE
 This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models are not allowed to be made public due to the lisence of AntGroup.
-
+![](docs/ute.png)
 ## Getting Started with DiffUTE
 ### Installation
 The codebases are built on top of [diffusers](https://github.com/huggingface/diffusers). Thanks very much.
@@ -51,6 +51,7 @@ accelerate launch train_diffute.py \
 ```
 
 ## Experimental results
+![](docs/result.png)
 
 ## Citing DiffUTE
 
