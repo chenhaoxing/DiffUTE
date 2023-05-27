@@ -1,7 +1,5 @@
 # DiffUTE
-This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model".
-
-Unfortunately, pre-trained models are not allowed to be made public due to the lisence of AntGroup.
+This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models are not allowed to be made public due to the lisence of AntGroup.
 
 ## Getting Started with DiffUTE
 ### Installation
