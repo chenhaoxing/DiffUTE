@@ -1,5 +1,5 @@
 # DiffUTE
-This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models are not allowed to be made public due to the lisence of AntGroup.
+This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models and original code are not allowed to be made public due to the lisence of AntGroup. You can You can easily reproduce our method using [diffusers](https://github.com/huggingface/diffusers) and [transformers](https://github.com/huggingface/transformers).
 ![](docs/ute.png)
 ## Getting Started with DiffUTE
 ### Installation
@@ -17,38 +17,9 @@ The codebases are built on top of [diffusers](https://github.com/huggingface/dif
 2. Prepare datasets. Due to data sensitivity issues, our data will not be publicly available now, you can reproduce it on your own data, and all images with text are available for model training. Because our data is present on [Ali-Yun oss](https://www.aliyun.com/search?spm=5176.22772544.J_8058803260.37.4aa92ea9DAomsC&k=OSS&__is_mobile__=false&__is_spider__=false&__is_grey__=false), we have chosen pcache to read the data we have stored. You can change the data reading method according to the way you store the data.
 
 3. Train VAE
-```bash
-export MODEL_NAME="stabilityai/stable-diffusion-2-inpainting"
-export OUTPUT_DIR="path-to-save-model"
 
-accelerate launch train_vae.py \
-  --pretrained_model_name_or_path=$MODEL_NAME  \
-  --output_dir=$OUTPUT_DIR \
-  --resolution=512 \
-  --train_batch_size=6 \
-  --gradient_accumulation_steps=1 --gradient_checkpointing \
-  --learning_rate=5e-6 \
-  --num_train_epochs=1 \
-  --lr_scheduler="constant" \
-  --lr_warmup_steps=3000 \
-```
 4. Train DiffUTE
-```bash
-export MODEL_NAME="stabilityai/stable-diffusion-2-inpainting"
-export OUTPUT_DIR="path-to-save-model"
 
-accelerate launch train_diffute.py \
-  --pretrained_model_name_or_path=$MODEL_NAME  \
-  --output_dir=$OUTPUT_DIR \
-  --resolution=512 \
-  --train_batch_size=32 \
-  --gradient_accumulation_steps=1 --gradient_checkpointing \
-  --learning_rate=1e-5 \
-  --lr_scheduler="constant" \
-  --lr_warmup_steps=5000 \
-  --num_train_epochs=5 \
-  --checkpointing_steps=10000
-```
 
 ## Experimental results
 ![](docs/result.png)
