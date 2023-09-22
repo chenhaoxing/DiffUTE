@@ -1,5 +1,5 @@
 # DiffUTE
-This repository is the code of our paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models and original code are not allowed to be made public due to the lisence of AntGroup. You can You can easily reproduce our method using [diffusers](https://github.com/huggingface/diffusers) and [transformers](https://github.com/huggingface/transformers).
+This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models and original code are not allowed to be made public due to the lisence of AntGroup. You can easily reproduce our method using [diffusers](https://github.com/huggingface/diffusers) and [transformers](https://github.com/huggingface/transformers).
 ![](docs/ute.png)
 ## Getting Started with DiffUTE
 ### Installation
@@ -29,10 +29,10 @@ The codebases are built on top of [diffusers](https://github.com/huggingface/dif
 If you use DiffUTE in your research or wish to refer to the baseline results published here, please use the following BibTeX entry.
 
 ```BibTeX
-@article{DiffUTE,
+@inproceedings{DiffUTE,
       title={DiffUTE: Universal Text Editing Diffusion Model},
       author={Chen, Haoxing and Xu, Zhuoer and Gu, Zhangxuan and Lan, Jun and Zheng, Xing and Li, Yaohui and Meng, Changhua and Zhu, Huijia and Wang, Weiqiang},
-      journal={arXiv preprint arXiv:2305.10825},
+      booktitle={Thirty-seventh Conference on Neural Information Processing Systems (NeurIPS)},
       year={2023}
 }
 ```
