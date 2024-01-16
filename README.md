@@ -1,5 +1,5 @@
 # DiffUTE
-This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models and original code are not allowed to be made public due to the lisence of AntGroup. You can easily reproduce our method using [diffusers](https://github.com/huggingface/diffusers) and [transformers](https://github.com/huggingface/transformers).
+This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Editing Diffusion Model". Unfortunately, pre-trained models are not allowed to be made public due to the lisence of AntGroup. You can easily reproduce our method using [diffusers](https://github.com/huggingface/diffusers) and [transformers](https://github.com/huggingface/transformers).
 ![](docs/ute.png)
 ## Getting Started with DiffUTE
 ### Installation
