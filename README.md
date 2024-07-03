@@ -5,6 +5,7 @@ This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Edi
 ### Installation
 The codebases are built on top of [diffusers](https://github.com/huggingface/diffusers). Thanks very much.
 
+
 #### Requirements
 - Linux or macOS with Python ≥ 3.8
 - PyTorch ≥ 1.10.0 and [torchvision](https://github.com/pytorch/vision/) that matches the PyTorch installation.
