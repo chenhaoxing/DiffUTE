@@ -19,7 +19,6 @@ import os
 import random
 from pathlib import Path
 from typing import Optional
-
 import accelerate
 import datasets
 import numpy as np
@@ -40,7 +39,6 @@ from torch.utils.data import Dataset
 import diffusers
 from PIL import Image, ImageDraw
 import json
-
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
