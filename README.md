@@ -1,5 +1,6 @@
-![image](https://github.com/user-attachments/assets/1372126f-a51f-427f-9fad-fa290cd46e08)# DiffUTE
-This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Editing Diffusion Model". We have reproduced our method using the AnyText dataset, and the weights can be downloaded at the [URL](https://modelscope.cn/models/cccnju/DiffUTE_SD2_Inp/summary). This checkpoint can be load for a demo.
+![image](https://github.com/user-attachments/assets/1372126f-a51f-427f-9fad-fa290cd46e08)
+# DiffUTE
+This repository is the code of our NeurIPS'23 paper "DiffUTE: Universal Text Editing Diffusion Model". We have reproduced our method using the AnyText dataset, and the weights can be downloaded at the [URL](https://modelscope.cn/models/cccnju/DiffUTE_SD2_Inp/summary). This checkpoint can be load for a [demo](https://github.com/chenhaoxing/DiffUTE/blob/main/app.ipynb).
 ![](docs/ute.png)
 ## Getting Started with DiffUTE
 ### Installation
