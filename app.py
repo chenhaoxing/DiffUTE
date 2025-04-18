@@ -1,53 +1,39 @@
 import gradio as gr
-import io
-import pandas as pd
 import numpy as np
-import os, cv2
-import pandas as pd
-import json
-from pandas import Series,DataFrame
+import os
+import cv2
 from PIL import Image, ImageDraw, ImageFont, ImageFile
 
 import argparse
 import logging
-import math
-import os
-import random
 from pathlib import Path
 from typing import Optional
 import accelerate
 import datasets
-import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
-from datasets import load_dataset
 from huggingface_hub import HfFolder, Repository, create_repo, whoami
 from packaging import version
-from torchvision import transforms
-from tqdm.auto import tqdm
-from torch.utils.data import Dataset
 import diffusers
 import albumentations as alb
 from albumentations.pytorch import ToTensorV2
-import PIL
-from PIL import Image, ImageDraw, ImageFont, ImageFile
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-import json
 
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel
-from diffusers.schedulers import KarrasDiffusionSchedulers
-from diffusers.optimization import get_scheduler
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    UNet2DConditionModel,
+)
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, deprecate
 from diffusers.utils.import_utils import is_xformers_available
 import torch.multiprocessing
 
-torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.15.0.dev0")
@@ -61,7 +47,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--pretrained_model_name_or_path",
     type=str,
-    default='/mnt/new/sd2-inp',
+    default="/mnt/new/sd2-inp",
     help="Path to pretrained model or model identifier from huggingface.co/models.",
 )
 parser.add_argument(
@@ -98,7 +84,10 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
-    "--image_column", type=str, default="image", help="The column of the dataset containing an image."
+    "--image_column",
+    type=str,
+    default="image",
+    help="The column of the dataset containing an image.",
 )
 parser.add_argument(
     "--max_train_samples",
@@ -121,7 +110,9 @@ parser.add_argument(
     default=None,
     help="The directory where the downloaded models and datasets will be stored.",
 )
-parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+parser.add_argument(
+    "--seed", type=int, default=None, help="A seed for reproducible training."
+)
 parser.add_argument(
     "--resolution",
     type=int,
@@ -148,7 +139,10 @@ parser.add_argument(
     help="whether to randomly flip images horizontally",
 )
 parser.add_argument(
-    "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
+    "--train_batch_size",
+    type=int,
+    default=16,
+    help="Batch size (per device) for the training dataloader.",
 )
 parser.add_argument("--num_train_epochs", type=int, default=100)
 parser.add_argument(
@@ -189,10 +183,15 @@ parser.add_argument(
     help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
 )
 parser.add_argument(
-    "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
+    "--lr_warmup_steps",
+    type=int,
+    default=500,
+    help="Number of steps for the warmup in the lr scheduler.",
 )
 parser.add_argument(
-    "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
+    "--use_8bit_adam",
+    action="store_true",
+    help="Whether or not to use 8-bit Adam from bitsandbytes.",
 )
 parser.add_argument(
     "--allow_tf32",
@@ -221,13 +220,41 @@ parser.add_argument(
         "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
     ),
 )
-parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
-parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
-parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
-parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
-parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
+parser.add_argument(
+    "--adam_beta1",
+    type=float,
+    default=0.9,
+    help="The beta1 parameter for the Adam optimizer.",
+)
+parser.add_argument(
+    "--adam_beta2",
+    type=float,
+    default=0.999,
+    help="The beta2 parameter for the Adam optimizer.",
+)
+parser.add_argument(
+    "--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use."
+)
+parser.add_argument(
+    "--adam_epsilon",
+    type=float,
+    default=1e-08,
+    help="Epsilon value for the Adam optimizer",
+)
+parser.add_argument(
+    "--max_grad_norm", default=1.0, type=float, help="Max gradient norm."
+)
+parser.add_argument(
+    "--push_to_hub",
+    action="store_true",
+    help="Whether or not to push the model to the Hub.",
+)
+parser.add_argument(
+    "--hub_token",
+    type=str,
+    default=None,
+    help="The token to use to push to the Model Hub.",
+)
 parser.add_argument(
     "--hub_model_id",
     type=str,
@@ -263,7 +290,9 @@ parser.add_argument(
         ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
     ),
 )
-parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+parser.add_argument(
+    "--local_rank", type=int, default=-1, help="For distributed training: local_rank"
+)
 parser.add_argument(
     "--checkpointing_steps",
     type=int,
@@ -303,10 +332,12 @@ parser.add_argument(
     default=None,
 )
 parser.add_argument(
-    "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
+    "--enable_xformers_memory_efficient_attention",
+    action="store_true",
+    help="Whether or not to use xformers.",
 )
 
-args, unknown =  parser.parse_known_args()
+args, unknown = parser.parse_known_args()
 
 env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
 if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -317,67 +348,79 @@ if args.non_ema_revision is None:
     args.non_ema_revision = args.revision
 
 
-
-#generate mask for ocr region
+# generate mask for ocr region
 image_trans_resize_and_crop = alb.Compose(
-            [   
-                alb.Resize(512,512),
-                alb.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-                ])
+    [
+        alb.Resize(512, 512),
+        alb.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ]
+)
 
 mask_resize_and_crop = alb.Compose(
-            [   
-                alb.Resize(512,512),
-                ])
+    [
+        alb.Resize(512, 512),
+    ]
+)
 
 image_trans = alb.Compose(
-            [   ToTensorV2(),])
+    [
+        ToTensorV2(),
+    ]
+)
 
 
-def draw_text(im_shape, text): 
+def draw_text(im_shape, text):
     font_size = 40
-    font_file = 'arialuni.ttf'
+    font_file = "arialuni.ttf"
     len_text = len(text)
     if len_text == 0:
         len_text = 3
-    img = Image.new('RGB', ((len_text+2)*font_size, 60), color='white')  
+    img = Image.new("RGB", ((len_text + 2) * font_size, 60), color="white")
     # Define the font object
     font = ImageFont.truetype(font_file, font_size)
     # Define the text and position
     pos = (40, 10)
 
     draw = ImageDraw.Draw(img)
-    draw.text(pos, text, font=font, fill='black')
+    draw.text(pos, text, font=font, fill="black")
     img = np.array(img)
 
     return img
 
-def process_location(location, instance_image_size):    
-    h = location[3]-location[1]
-    location[3] = min(location[3]+h/10, instance_image_size[0]-1)
+
+def process_location(location, instance_image_size):
+    h = location[3] - location[1]
+    location[3] = min(location[3] + h / 10, instance_image_size[0] - 1)
     return location
+
 
 def generate_mask(im_shape, ocr_locate):
     mask = Image.new("L", im_shape, 0)
     draw = ImageDraw.Draw(mask)
     draw.rectangle(
-            (ocr_locate[0], ocr_locate[1], ocr_locate[2], ocr_locate[3]),
-            fill=1,
-        )
+        (ocr_locate[0], ocr_locate[1], ocr_locate[2], ocr_locate[3]),
+        fill=1,
+    )
     mask = np.array(mask)
     return mask
 
+
 def prepare_mask_and_masked_image(image, mask):
-    masked_image = np.multiply(image, np.stack([mask < 0.5,mask < 0.5,mask < 0.5]).transpose(1,2,0))
- 
+    masked_image = np.multiply(
+        image, np.stack([mask < 0.5, mask < 0.5, mask < 0.5]).transpose(1, 2, 0)
+    )
+
     return masked_image
 
-def download_oss_file_pcache(my_file = "xxx"):
+
+def download_oss_file_pcache(my_file="xxx"):
     # This function is no longer needed as we're not using OSS
     pass
 
 
-def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
+def get_full_repo_name(
+    model_id: str, organization: Optional[str] = None, token: Optional[str] = None
+):
     if token is None:
         token = HfFolder.get_token()
     if organization is None:
@@ -385,6 +428,7 @@ def get_full_repo_name(model_id: str, organization: Optional[str] = None, token:
         return f"{username}/{model_id}"
     else:
         return f"{organization}/{model_id}"
+
 
 def numpy_to_pil(images):
     """
@@ -401,8 +445,9 @@ def numpy_to_pil(images):
 
     return pil_images
 
+
 def tensor2im(input_image, imtype=np.uint8):
-    """"Converts a Tensor array into a numpy image array.
+    """ "Converts a Tensor array into a numpy image array.
 
     Parameters:
         input_image (tensor) --  the input image tensor array
@@ -413,15 +458,22 @@ def tensor2im(input_image, imtype=np.uint8):
             image_tensor = input_image.data
         else:
             return input_image
-        image_numpy = image_tensor[0].cpu().float().numpy()  # convert it into a numpy array
+        image_numpy = (
+            image_tensor[0].cpu().float().numpy()
+        )  # convert it into a numpy array
         if image_numpy.shape[0] == 1:  # grayscale to RGB
             image_numpy = np.tile(image_numpy, (3, 1, 1))
-        image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0  # post-processing: tranpose and scaling
+        image_numpy = (
+            (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
+        )  # post-processing: tranpose and scaling
     else:  # if it is a numpy array, do nothing
         image_numpy = input_image
     return image_numpy.astype(imtype)
 
+
 from typing import List, Optional, Tuple, Union
+
+
 def randn_tensor(
     shape: Union[Tuple, List],
     generator: Optional[Union[List["torch.Generator"], "torch.Generator"]] = None,
@@ -441,7 +493,11 @@ def randn_tensor(
     device = device or torch.device("cpu")
 
     if generator is not None:
-        gen_device_type = generator.device.type if not isinstance(generator, list) else generator[0].device.type
+        gen_device_type = (
+            generator.device.type
+            if not isinstance(generator, list)
+            else generator[0].device.type
+        )
         if gen_device_type != device.type and gen_device_type == "cpu":
             rand_device = "cpu"
             if device != "mps":
@@ -451,19 +507,30 @@ def randn_tensor(
                     f" slighly speed up this function by passing a generator that was created on the {device} device."
                 )
         elif gen_device_type != device.type and gen_device_type == "cuda":
-            raise ValueError(f"Cannot generate a {device} tensor from a generator of type {gen_device_type}.")
+            raise ValueError(
+                f"Cannot generate a {device} tensor from a generator of type {gen_device_type}."
+            )
 
     if isinstance(generator, list):
         shape = (1,) + shape[1:]
         latents = [
-            torch.randn(shape, generator=generator[i], device=rand_device, dtype=dtype, layout=layout)
+            torch.randn(
+                shape,
+                generator=generator[i],
+                device=rand_device,
+                dtype=dtype,
+                layout=layout,
+            )
             for i in range(batch_size)
         ]
         latents = torch.cat(latents, dim=0).to(device)
     else:
-        latents = torch.randn(shape, generator=generator, device=rand_device, dtype=dtype, layout=layout).to(device)
+        latents = torch.randn(
+            shape, generator=generator, device=rand_device, dtype=dtype, layout=layout
+        ).to(device)
 
     return latents
+
 
 # args = parse_args()
 
@@ -478,7 +545,9 @@ if args.non_ema_revision is not None:
     )
 logging_dir = os.path.join(args.output_dir, args.logging_dir)
 
-accelerator_project_config = ProjectConfiguration(total_limit=args.checkpoints_total_limit)
+accelerator_project_config = ProjectConfiguration(
+    total_limit=args.checkpoints_total_limit
+)
 
 accelerator = Accelerator(
     gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -512,7 +581,9 @@ if args.seed is not None:
 if accelerator.is_main_process:
     if args.push_to_hub:
         if args.hub_model_id is None:
-            repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
+            repo_name = get_full_repo_name(
+                Path(args.output_dir).name, token=args.hub_token
+            )
         else:
             repo_name = args.hub_model_id
         create_repo(repo_name, exist_ok=True, token=args.hub_token)
@@ -528,14 +599,20 @@ if accelerator.is_main_process:
 
 
 # Load scheduler, tokenizer and models.
-noise_scheduler = DDPMScheduler.from_pretrained('./sd2-inp', subfolder="scheduler")
-processor = TrOCRProcessor.from_pretrained('./trocr-large-printed')
-trocr_model = VisionEncoderDecoderModel.from_pretrained('./trocr-large-printed').encoder.cuda()
-full_trocr_model = VisionEncoderDecoderModel.from_pretrained('./trocr-large-printed').cuda()
+noise_scheduler = DDPMScheduler.from_pretrained("./sd2-inp", subfolder="scheduler")
+processor = TrOCRProcessor.from_pretrained("./trocr-large-printed")
+trocr_model = VisionEncoderDecoderModel.from_pretrained(
+    "./trocr-large-printed"
+).encoder.cuda()
+full_trocr_model = VisionEncoderDecoderModel.from_pretrained(
+    "./trocr-large-printed"
+).cuda()
 
-vae = AutoencoderKL.from_pretrained('./pretrianed/vae', subfolder="vae", revision=args.revision).cuda()
+vae = AutoencoderKL.from_pretrained(
+    "./pretrianed/vae", subfolder="vae", revision=args.revision
+).cuda()
 unet = UNet2DConditionModel.from_pretrained(
-    './pretrianed/unet', subfolder="unet", revision=args.non_ema_revision
+    "./pretrianed/unet", subfolder="unet", revision=args.non_ema_revision
 ).cuda()
 
 # Freeze vae and text_encoder
@@ -554,7 +631,11 @@ if args.use_ema:
     ema_unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
-    ema_unet = EMAModel(ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=ema_unet.config)
+    ema_unet = EMAModel(
+        ema_unet.parameters(),
+        model_cls=UNet2DConditionModel,
+        model_config=ema_unet.config,
+    )
 
 if args.enable_xformers_memory_efficient_attention:
     if is_xformers_available():
@@ -567,12 +648,15 @@ if args.enable_xformers_memory_efficient_attention:
             )
         unet.enable_xformers_memory_efficient_attention()
     else:
-        raise ValueError("xformers is not available. Make sure it is installed correctly")
+        raise ValueError(
+            "xformers is not available. Make sure it is installed correctly"
+        )
+
 
 def to_tensor(image):
-    if isinstance(image, Image.Image):  
+    if isinstance(image, Image.Image):
         image = np.array(image)
-    elif not isinstance(image, np.ndarray):  
+    elif not isinstance(image, np.ndarray):
         raise TypeError("Error")
 
     image = image.astype(np.float32) / 255.0
@@ -580,6 +664,7 @@ def to_tensor(image):
     tensor = torch.from_numpy(image)
 
     return tensor
+
 
 # `accelerate` 0.16.0 will have better support for customized saving
 if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -596,7 +681,9 @@ if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
 
     def load_model_hook(models, input_dir):
         if args.use_ema:
-            load_model = EMAModel.from_pretrained(os.path.join(input_dir, "unet_ema"), UNet2DConditionModel)
+            load_model = EMAModel.from_pretrained(
+                os.path.join(input_dir, "unet_ema"), UNet2DConditionModel
+            )
             ema_unet.load_state_dict(load_model.state_dict())
             ema_unet.to(accelerator.device)
             del load_model
@@ -606,7 +693,9 @@ if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
             model = models.pop()
 
             # load diffusers style into model
-            load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
+            load_model = UNet2DConditionModel.from_pretrained(
+                input_dir, subfolder="unet"
+            )
             model.register_to_config(**load_model.config)
 
             model.load_state_dict(load_model.state_dict())
@@ -636,6 +725,7 @@ if args.use_8bit_adam:
 else:
     optimizer_cls = torch.optim.AdamW
 
+
 def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     examples = {}
     noise_scheduler_te = noise_scheduler
@@ -644,33 +734,31 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     vae_te = vae
     unet_te = unet
 
-
-    full_trocr_model_te = full_trocr_model
-    bbox = [x0,y0,x1,y1]
+    bbox = [x0, y0, x1, y1]
 
     location = np.int32(bbox)
 
-    #crop scale对结果影响很大，可根据本批数据集进行微调
-    char_height = location[3]-location[1]
-    char_lenth = location[2]-location[0]
+    # crop scale对结果影响很大，可根据本批数据集进行微调
+    char_height = location[3] - location[1]
+    char_lenth = location[2] - location[0]
 
-    h,w,c = instance_image.shape
+    h, w, c = instance_image.shape
     short_side = min(h, w)
 
-    if 6 * char_height <128:
+    if 6 * char_height < 128:
         CROP_LENTH = max(128, char_lenth)
-    elif 6 * char_height <256:
+    elif 6 * char_height < 256:
         CROP_LENTH = max(256, char_lenth)
-    elif 6 * char_height <384:
+    elif 6 * char_height < 384:
         CROP_LENTH = max(384, char_lenth)
-    elif 6 * char_height <512:
+    elif 6 * char_height < 512:
         CROP_LENTH = max(512, char_lenth)
-    elif 6 * char_height <640:
+    elif 6 * char_height < 640:
         CROP_LENTH = max(640, char_lenth)
-    elif 6 * char_height <784:
-        CROP_LENTH = max(784, char_lenth)    
-    elif 6 * char_height <1000:
-        CROP_LENTH = max(1000, char_lenth) 
+    elif 6 * char_height < 784:
+        CROP_LENTH = max(784, char_lenth)
+    elif 6 * char_height < 1000:
+        CROP_LENTH = max(1000, char_lenth)
     else:
         CROP_LENTH = 6 * char_height
 
@@ -680,41 +768,41 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     else:
         crop_scale = short_side
 
-    text_te, ori_text = text, text
-    
+    _text_te, _ori_text = text, text
+
     mask = generate_mask(instance_image.shape[:2][::-1], location)
     masked_image = prepare_mask_and_masked_image(instance_image, mask)
-    x1,y1,x2,y2 = location
-    if x2-x1 < crop_scale:
+    x1, y1, x2, y2 = location
+    if x2 - x1 < crop_scale:
         if x2 - crop_scale > 0:
-            x_s = x2 - crop_scale 
+            x_s = x2 - crop_scale
         elif x1 + crop_scale < w:
-            x_s = x1 
+            x_s = x1
         else:
             x_s = 0
     else:
-        x_s = np.random.randint(x1, max(0, x2-crop_scale-1))
+        x_s = np.random.randint(x1, max(0, x2 - crop_scale - 1))
 
-    if y2-y1 < crop_scale:
+    if y2 - y1 < crop_scale:
         if y2 - crop_scale > 0:
-            y_s = y2 - crop_scale 
+            y_s = y2 - crop_scale
         elif y1 + crop_scale < w:
-            y_s = y1 
+            y_s = y1
         else:
             y_s = 0
     else:
-        y_s = np.random.randint(y1, max(0, y2-crop_scale-1))
+        y_s = np.random.randint(y1, max(0, y2 - crop_scale - 1))
 
     draw_ttf = draw_text(instance_image.shape[:2][::-1], text)
-    instance_image_1 = instance_image[y_s:y_s+crop_scale, x_s:x_s+crop_scale,:]
-    mask_crop = mask[y_s:y_s+crop_scale, x_s:x_s+crop_scale]
-    masked_image_crop = masked_image[y_s:y_s+crop_scale, x_s:x_s+crop_scale,:]
+    instance_image_1 = instance_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
+    mask_crop = mask[y_s : y_s + crop_scale, x_s : x_s + crop_scale]
+    masked_image_crop = masked_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
 
     # cv2.imwrite('ttf.jpg', draw_ttf)
     # cv2.imwrite('instance_image_1.jpg', instance_image_1)
     # cv2.imwrite('mask_crop.jpg', mask_crop*255)
     # cv2.imwrite('masked_image_crop.jpg', masked_image_crop)
-    
+
     augmented = image_trans_resize_and_crop(image=instance_image_1)
     instance_image_1 = augmented["image"]
     augmented = image_trans(image=instance_image_1)
@@ -738,11 +826,10 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
 
     examples["ori_image"] = instance_image
     examples["instance_images"] = instance_image_1
-    examples['mask'] = mask_crop
-    examples['masked_image'] = masked_image_crop
-    examples['ttf_img'] = draw_ttf
+    examples["mask"] = mask_crop
+    examples["masked_image"] = masked_image_crop
+    examples["ttf_img"] = draw_ttf
     examples["crop_scale"] = crop_scale
-
 
     input_values = instance_image_1.unsqueeze(0)
     input_values = input_values.to(memory_format=torch.contiguous_format).float()
@@ -766,22 +853,29 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         # Convert images to latent space
         latents = vae_te.encode(input_values.to(weight_dtype)).latent_dist.sample()
         latents = latents * vae_te.config.scaling_factor
-        noise = torch.randn_like(latents)
+        torch.randn_like(latents)
 
-        
-        # Rex: prepare mask && mask latent as input of UNET                
+        # Rex: prepare mask && mask latent as input of UNET
         width, height, *_ = mask_crop.size()[::-1]
         mask_crop = torch.nn.functional.interpolate(
-            mask_crop, size=[width //vae_scale_factor, height//vae_scale_factor, *_][:-2][::-1]
+            mask_crop,
+            size=[width // vae_scale_factor, height // vae_scale_factor, *_][:-2][::-1],
         )
         mask_crop = mask_crop.to(weight_dtype)
 
         masked_image_latents = vae.encode(masked_image_crop).latent_dist.sample()
         masked_image_latents = masked_image_latents * vae.config.scaling_factor
 
-        shape = (1, vae.config.latent_channels, height // vae_scale_factor, width // vae_scale_factor)
+        shape = (
+            1,
+            vae.config.latent_channels,
+            height // vae_scale_factor,
+            width // vae_scale_factor,
+        )
 
-        latents = randn_tensor(shape, generator=torch.manual_seed(0), dtype=weight_dtype)
+        latents = randn_tensor(
+            shape, generator=torch.manual_seed(0), dtype=weight_dtype
+        )
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * noise_scheduler_te.init_noise_sigma
         latents = latents.cuda()
@@ -793,14 +887,18 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents
             # concat latents, mask, masked_image_latents in the channel dimension
-            latent_model_input = noise_scheduler_te.scale_model_input(latent_model_input, t)
-            latent_model_input = torch.cat([latent_model_input, mask_crop, masked_image_latents], dim=1)
-            
+            latent_model_input = noise_scheduler_te.scale_model_input(
+                latent_model_input, t
+            )
+            latent_model_input = torch.cat(
+                [latent_model_input, mask_crop, masked_image_latents], dim=1
+            )
+
             # predict the noise residual
             noise_pred = unet_te(latent_model_input, t, ocr_embeddings).sample
             # compute the previous noisy sample x_t -> x_t-1
             latents = noise_scheduler_te.step(noise_pred, t, latents).prev_sample
-         # 11. Post-processing
+        # 11. Post-processing
         pred_latents = 1 / vae_te.config.scaling_factor * latents
         image_vae = vae_te.decode(pred_latents).sample
 
@@ -814,15 +912,17 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
             r_h = h - y_s
         else:
             r_h = crop_scale
-            
+
         if x_s + crop_scale > w:
             r_w = w - x_s
         else:
             r_w = crop_scale
-        
+
         inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
         mid_inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
-        mid_inf_res[y_s:y_s+crop_scale, x_s:x_s+crop_scale, :] = cv2.resize(image, (r_w,r_h))
+        mid_inf_res[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :] = cv2.resize(
+            image, (r_w, r_h)
+        )
         inf_res[y1:y2, x1:x2, :] = mid_inf_res[y1:y2, x1:x2, :]
 
         # generated_text_imgs = inf_res[y1:y2, x1:x2, :]
@@ -833,79 +933,167 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         # print(generated_text)
         inf_res = inf_res.round().astype("uint8")
         print(type(inf_res), type(mask))
-        inf_res = Image.fromarray(inf_res).convert('RGB')
+        inf_res = Image.fromarray(inf_res).convert("RGB")
         ori_comp = instance_image.cpu().permute(1, 2, 0).float().numpy()
-        ori_comp = Image.fromarray(ori_comp.round().astype("uint8")).convert('RGB')
-        
-    return inf_res, mask*255
+        ori_comp = Image.fromarray(ori_comp.round().astype("uint8")).convert("RGB")
+
+    return inf_res, mask * 255
+
 
 ROI_coordinates = {
-    'x_temp': 0,
-    'y_temp': 0,
-    'x_new': 0,
-    'y_new': 0,
-    'clicks': 0,
+    "x_temp": 0,
+    "y_temp": 0,
+    "x_new": 0,
+    "y_new": 0,
+    "clicks": 0,
 }
+
 
 def get_select_coordinates(img, x0, y0, x1, y1, evt: gr.SelectData):
     sections = []
     # update new coordinates
-    ROI_coordinates['clicks'] += 1
-    ROI_coordinates['x_temp'] = ROI_coordinates['x_new']
-    ROI_coordinates['y_temp'] = ROI_coordinates['y_new']
-    ROI_coordinates['x_new'] = evt.index[0]
-    ROI_coordinates['y_new'] = evt.index[1]
+    ROI_coordinates["clicks"] += 1
+    ROI_coordinates["x_temp"] = ROI_coordinates["x_new"]
+    ROI_coordinates["y_temp"] = ROI_coordinates["y_new"]
+    ROI_coordinates["x_new"] = evt.index[0]
+    ROI_coordinates["y_new"] = evt.index[1]
     # compare start end coordinates
-    x_start = ROI_coordinates['x_new'] if (ROI_coordinates['x_new'] < ROI_coordinates['x_temp']) else ROI_coordinates['x_temp']
-    y_start = ROI_coordinates['y_new'] if (ROI_coordinates['y_new'] < ROI_coordinates['y_temp']) else ROI_coordinates['y_temp']
-    x_end = ROI_coordinates['x_new'] if (ROI_coordinates['x_new'] > ROI_coordinates['x_temp']) else ROI_coordinates['x_temp']
-    y_end = ROI_coordinates['y_new'] if (ROI_coordinates['y_new'] > ROI_coordinates['y_temp']) else ROI_coordinates['y_temp']
-    if ROI_coordinates['clicks'] % 2 == 0:
+    x_start = (
+        ROI_coordinates["x_new"]
+        if (ROI_coordinates["x_new"] < ROI_coordinates["x_temp"])
+        else ROI_coordinates["x_temp"]
+    )
+    y_start = (
+        ROI_coordinates["y_new"]
+        if (ROI_coordinates["y_new"] < ROI_coordinates["y_temp"])
+        else ROI_coordinates["y_temp"]
+    )
+    x_end = (
+        ROI_coordinates["x_new"]
+        if (ROI_coordinates["x_new"] > ROI_coordinates["x_temp"])
+        else ROI_coordinates["x_temp"]
+    )
+    y_end = (
+        ROI_coordinates["y_new"]
+        if (ROI_coordinates["y_new"] > ROI_coordinates["y_temp"])
+        else ROI_coordinates["y_temp"]
+    )
+    if ROI_coordinates["clicks"] % 2 == 0:
         # both start and end point get
         sections.append(((x_start, y_start, x_end, y_end), "ROI of Text Editing"))
 
         x0, y0, x1, y1 = x_start, y_start, x_end, y_end
         print(x0, y0, x1, y1)
-        return (img, sections),x0, y0, x1, y1
+        return (img, sections), x0, y0, x1, y1
     else:
-        point_width = int(img.shape[0]*0.05)
-        sections.append(((ROI_coordinates['x_new'], ROI_coordinates['y_new'], 
-                          ROI_coordinates['x_new'] + point_width, ROI_coordinates['y_new'] + point_width),
-                        "Click second point for ROI"))
-        x0, y0, x1, y1 = ROI_coordinates['x_new'], ROI_coordinates['y_new'], ROI_coordinates['x_new'] + point_width, ROI_coordinates['y_new'] + point_width
+        point_width = int(img.shape[0] * 0.05)
+        sections.append(
+            (
+                (
+                    ROI_coordinates["x_new"],
+                    ROI_coordinates["y_new"],
+                    ROI_coordinates["x_new"] + point_width,
+                    ROI_coordinates["y_new"] + point_width,
+                ),
+                "Click second point for ROI",
+            )
+        )
+        x0, y0, x1, y1 = (
+            ROI_coordinates["x_new"],
+            ROI_coordinates["y_new"],
+            ROI_coordinates["x_new"] + point_width,
+            ROI_coordinates["y_new"] + point_width,
+        )
 
-        return (img, sections),x0, y0, x1, y1
+        return (img, sections), x0, y0, x1, y1
+
 
 with gr.Blocks() as demo:
     gr.Markdown("DiffUTE: Universal Text Editing Diffusion Model")
     with gr.Tab("Text editing pipeline"):
         with gr.Row():
             with gr.Column():
-                ori_image = gr.Image(label='Original image')
-                text_input = gr.Textbox(label='Input the text you want to write here')
-                img_output = gr.AnnotatedImage(label="ROI", color_map={"Click second point for ROI": "#f44336"})
-                button = gr.Button("Generate",variant="primary")
+                ori_image = gr.Image(label="Original image")
+                text_input = gr.Textbox(label="Input the text you want to write here")
+                img_output = gr.AnnotatedImage(
+                    label="ROI", color_map={"Click second point for ROI": "#f44336"}
+                )
+                button = gr.Button("Generate", variant="primary")
                 with gr.Row():
-                        x0 = gr.Number(label="X0")
-                        x1 = gr.Number(label="X1")
-                        y0 = gr.Number(label="Y0")
-                        y1 = gr.Number(label="Y1")
-                text_edit_examples = [ 
-                                    ["2023-07-25","./examples/1793.jpg",'150','204','240','333','270','512'],
-                                    ["ANT","./examples/00000006.jpg",'150','334','213','401','245','384'],
-                                    ["88.88","./examples/icdar_10201.jpg",'150','703','1236','841','1301','640'],
-                                    ["7890","./examples/card_11116.jpg",'150','475','276','611','338','640'],
-                                    ]
-                ute_steps = gr.Slider(20.0, 200.0, value=150, step=1, label="Inference step",info='The step of denoising process.')
-                
-                gr.Examples(text_edit_examples,inputs=[text_input, ori_image, ute_steps, x0,y0,x1,y1])
-                
+                    x0 = gr.Number(label="X0")
+                    x1 = gr.Number(label="X1")
+                    y0 = gr.Number(label="Y0")
+                    y1 = gr.Number(label="Y1")
+                text_edit_examples = [
+                    [
+                        "2023-07-25",
+                        "./examples/1793.jpg",
+                        "150",
+                        "204",
+                        "240",
+                        "333",
+                        "270",
+                        "512",
+                    ],
+                    [
+                        "ANT",
+                        "./examples/00000006.jpg",
+                        "150",
+                        "334",
+                        "213",
+                        "401",
+                        "245",
+                        "384",
+                    ],
+                    [
+                        "88.88",
+                        "./examples/icdar_10201.jpg",
+                        "150",
+                        "703",
+                        "1236",
+                        "841",
+                        "1301",
+                        "640",
+                    ],
+                    [
+                        "7890",
+                        "./examples/card_11116.jpg",
+                        "150",
+                        "475",
+                        "276",
+                        "611",
+                        "338",
+                        "640",
+                    ],
+                ]
+                ute_steps = gr.Slider(
+                    20.0,
+                    200.0,
+                    value=150,
+                    step=1,
+                    label="Inference step",
+                    info="The step of denoising process.",
+                )
+
+                gr.Examples(
+                    text_edit_examples,
+                    inputs=[text_input, ori_image, ute_steps, x0, y0, x1, y1],
+                )
+
             with gr.Column():
-                output_imgs = gr.Image(label='Generated image')
-                output_masks = gr.Image(label='Generated mask')
-            
-    ori_image.select(get_select_coordinates, [ori_image, x0, y0, x1, y1], [img_output, x0, y0, x1, y1])
-    button.click(text_editing, inputs=[text_input, ori_image, ute_steps, x0,y0,x1,y1], outputs=[output_imgs, output_masks])
+                output_imgs = gr.Image(label="Generated image")
+                output_masks = gr.Image(label="Generated mask")
+
+    ori_image.select(
+        get_select_coordinates,
+        [ori_image, x0, y0, x1, y1],
+        [img_output, x0, y0, x1, y1],
+    )
+    button.click(
+        text_editing,
+        inputs=[text_input, ori_image, ute_steps, x0, y0, x1, y1],
+        outputs=[output_imgs, output_masks],
+    )
 
 if __name__ == "__main__":
     demo.launch(debug=True, enable_queue=True)
