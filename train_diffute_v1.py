@@ -23,7 +23,7 @@ import logging
 import math
 import random
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 import argparse
 import torch.multiprocessing
 
@@ -414,14 +414,14 @@ image_trans_to_tensor = alb.Compose(
 # === Text Rendering Helper ===
 def draw_text(im_shape, text: str) -> np.ndarray:
     """
-    Renders the given text onto a white background image.
+    Renders text on a blank image with specified dimensions.
 
     Args:
-        im_shape: The shape of the original image (used loosely for font size context, not directly for output size).
-        text (str): The text string to render.
+        im_shape (tuple): The shape of the image to create (height, width).
+        text (str): The text to render on the image.
 
     Returns:
-        np.ndarray: A NumPy array representing the rendered text image (RGB).
+        np.ndarray: A binary image with the rendered text in white on black background.
     """
     font_size = 40
     # Ensure a font file is available. Adjust path if necessary or use a system default.
@@ -479,15 +479,21 @@ def draw_text(im_shape, text: str) -> np.ndarray:
 # === Location Processing Helper ===
 def process_location(location: list, instance_image_size: tuple) -> list:
     """
-    Adjusts the bounding box location slightly, potentially expanding it.
-    Ensures coordinates stay within image bounds.
+    Process and validate OCR location coordinates against image dimensions.
+
+    This function takes OCR-detected text location coordinates and validates them
+    against the image dimensions, ensuring they fall within valid bounds. It also
+    handles coordinate normalization and validation.
 
     Args:
-        location (list): Bounding box coordinates [x_min, y_min, x_max, y_max].
-        instance_image_size (tuple): The shape of the image (height, width, channels).
+        location (list): List of coordinates [x1, y1, x2, y2] from OCR detection
+        instance_image_size (tuple): Image dimensions as (width, height)
 
     Returns:
-        list: The adjusted bounding box coordinates.
+        list: Processed and validated coordinates [x1, y1, x2, y2]
+
+    Raises:
+        ValueError: If coordinates are invalid or out of bounds
     """
     img_height, img_width = instance_image_size[:2]
     x_min, y_min, x_max, y_max = location
@@ -563,14 +569,21 @@ def generate_mask(im_shape: tuple, ocr_locate: list) -> np.ndarray:
 # === Masked Image Preparation Helper ===
 def prepare_mask_and_masked_image(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Applies the mask to the image. The masked area in the output image will be black (0).
+    Prepares a masked version of an input image.
+
+    This function applies a binary mask to an image, creating a version where
+    the masked regions (text areas) are blacked out. This is used to prepare
+    inputs for the inpainting model.
 
     Args:
-        image (np.ndarray): The original image (HWC format, e.g., BGR or RGB).
-        mask (np.ndarray): The binary mask (HW format, values 0 or 255/1).
+        image (np.ndarray): Original image array (RGB).
+        mask (np.ndarray): Binary mask array where text regions are marked.
 
     Returns:
-        np.ndarray: The masked image, where the masked region is set to zero.
+        np.ndarray: Image with text regions masked out.
+
+    Raises:
+        ValueError: If image and mask shapes don't match.
     """
     # Ensure mask is boolean (True where image should be kept, False where it should be masked out)
     # Assuming mask has 0 for background and non-zero (e.g., 255 or 1) for the region to *remove* (inpainting target)
@@ -588,8 +601,10 @@ def prepare_mask_and_masked_image(image: np.ndarray, mask: np.ndarray) -> np.nda
 # === Alternative Data Loading (Using pcache_fileio) ===
 def download_oss_file_pcache(my_file: str = "xxx") -> np.ndarray:
     """
-    Downloads a file (expected image) using the pcache_fileio library,
-    presumably from an OSS (Object Storage Service) source configured elsewhere.
+    Downloads a file from OSS using pcache.
+
+    This function is a legacy implementation for downloading files from OSS
+    storage using pcache. It's recommended to use MinIO client instead.
 
     Args:
         my_file (str): The relative path or identifier for the file within the configured OSS/cache.
@@ -635,13 +650,28 @@ class OursDataset(Dataset):
     Custom PyTorch Dataset for loading document images, corresponding OCR data,
     generating masks, cropping, and preparing inputs for the inpainting model.
 
-    It expects:
-    - A CSV file (`data_csv_path`) listing image paths relative to some base.
-    - OCR results stored as JSON files, accessible relative to an `ocr_root` path.
-    - Images downloadable via either `download_file_minio` or `download_oss_file_pcache`.
-      (The second `__getitem__` uses `download_oss_file_pcache`).
-    - A font file for rendering text (`draw_text` function).
+    This dataset handles loading and preprocessing of document images and their
+    corresponding OCR data for training the text editing diffusion model. It supports
+    loading data from either local storage or MinIO cloud storage.
+
+    The dataset prepares three key components for each training example:
+    1. Original image: The source document image
+    2. Mask: Binary mask indicating text regions to be edited
+    3. Text rendering: A rendered version of the target text
+
+    Attributes:
+        data_csv_path (str): Path to CSV file containing image paths and OCR data
+        ocr_root (str): Root directory/prefix for OCR data files
+        size (int): Target size for image resizing
+        transform_resize_crop (alb.Compose): Transforms for resizing/cropping
+        transform_to_tensor (alb.Compose): Transforms for tensor conversion
+        mask_transform (alb.Compose): Transforms for mask processing
+        use_minio (bool): Whether to use MinIO for data loading
+        crop_scale (int): Scale for cropping around text regions
+        image_paths (list): List of paths to all images
+        ocr_data (list): List of OCR data for each image
     """
+
     def __init__(self,
                  data_csv_path: str,
                  ocr_root: str,
@@ -652,7 +682,7 @@ class OursDataset(Dataset):
                  use_minio: bool = False, # Flag to choose download method
                  crop_scale: int = 256): # Added crop_scale as parameter
         """
-        Initializes the dataset.
+        Initialize the dataset with specified parameters and transformations.
 
         Args:
             data_csv_path (str): Path to the CSV file with image paths.
@@ -664,24 +694,17 @@ class OursDataset(Dataset):
             use_minio (bool): If True, use `download_file_minio`; otherwise, use `download_oss_file_pcache`.
             crop_scale (int): The size of the square crop region around the text.
         """
-        self.size = size
         self.data_csv_path = data_csv_path
         self.ocr_root = ocr_root
-        self.instance_image_paths = []
-        self._load_images_paths() # Load paths from CSV
-        self.num_instance_images = len(self.instance_image_paths)
-        self._length = self.num_instance_images # Total number of samples
+        self.size = size
         self.transform_resize_crop = transform_resize_crop
         self.transform_to_tensor = transform_to_tensor
         self.mask_transform = mask_transform
         self.use_minio = use_minio
-        self.crop_scale = crop_scale # Store crop scale
+        self.crop_scale = crop_scale
 
-        # Basic validation
-        if not self.instance_image_paths:
-            raise ValueError(f"No image paths loaded from {self.data_csv_path}. Check the file and 'path' column.")
-        if not self.transform_resize_crop or not self.transform_to_tensor or not self.mask_transform:
-            raise ValueError("Required Albumentations transforms not provided to OursDataset.")
+        # Load image paths and OCR data
+        self.image_paths, self.ocr_data = self._load_images_paths()
 
     def _load_images_paths(self):
         """Loads image paths from the specified CSV file."""
@@ -979,15 +1002,21 @@ class OursDataset(Dataset):
 # === Hugging Face Hub Utilities ===
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None) -> str:
     """
-    Constructs the full repository name for the Hugging Face Hub.
+    Constructs the full repository name for Hugging Face Hub.
+
+    This function takes a model ID and optional organization name to construct
+    the full repository name used for pushing models to the Hugging Face Hub.
 
     Args:
-        model_id (str): The base name of the model repository.
-        organization (Optional[str]): The organization name. If None, uses the logged-in user's username.
-        token (Optional[str]): Hugging Face Hub authentication token. If None, tries to get it from the environment.
+        model_id (str): Base name/ID for the model.
+        organization (str, optional): Organization name on Hugging Face Hub.
+        token (str, optional): Authentication token for Hugging Face Hub.
 
     Returns:
-        str: The full repository name (e.g., "username/model_id" or "organization/model_id").
+        str: Full repository name (e.g., "organization/model-id").
+
+    Raises:
+        ValueError: If required authentication information is missing.
     """
     if token is None:
         token = HfFolder.get_token() # Try to get token from saved credentials
@@ -1004,15 +1033,20 @@ def get_full_repo_name(model_id: str, organization: Optional[str] = None, token:
 # === Tensor/NumPy Conversion Utilities ===
 def numpy_to_pil(images: np.ndarray) -> list:
     """
-    Converts a NumPy image array or a batch of image arrays to a list of PIL Images.
-    Assumes input images are in HWC format and pixel values are normalized to [0, 1] or similar range
-    that needs to be scaled up to [0, 255].
+    Converts NumPy image arrays to PIL Image objects.
+
+    This function handles the conversion of one or more images from NumPy array
+    format to PIL Image objects, including necessary normalization and type
+    conversion.
 
     Args:
-        images (np.ndarray): NumPy array of shape (N, H, W, C) or (H, W, C). Values expected ~[0, 1].
+        images (np.ndarray): Single image or batch of images as NumPy arrays.
 
     Returns:
-        list: A list of PIL.Image.Image objects.
+        list: List of PIL Image objects.
+
+    Raises:
+        ValueError: If input array format is invalid.
     """
     if images.ndim == 3:
         images = images[None, ...] # Add batch dimension if single image
@@ -1035,16 +1069,20 @@ def numpy_to_pil(images: np.ndarray) -> list:
 
 def tensor2im(input_image: torch.Tensor, imtype=np.uint8) -> np.ndarray:
     """
-    Converts a PyTorch Tensor representing an image or batch of images into a NumPy array suitable for display/saving.
-    Handles denormalization (assumes input tensor is in [-1, 1] range).
+    Converts a PyTorch tensor to a NumPy image array.
+
+    This function handles the conversion of image data from PyTorch tensor format
+    to NumPy array format, including denormalization and type conversion.
 
     Args:
-        input_image (torch.Tensor): Input image tensor (B, C, H, W) or (C, H, W). Expected range [-1, 1].
-        imtype (type): The desired data type for the output NumPy array (default: np.uint8).
+        input_image (torch.Tensor): Input image tensor.
+        imtype (np.dtype): Target NumPy data type (default: np.uint8).
 
     Returns:
-        np.ndarray: The converted image as a NumPy array (H, W, C), with values in [0, 255].
-                    Only returns the first image if input is a batch.
+        np.ndarray: Image array in specified format.
+
+    Raises:
+        ValueError: If input tensor format is invalid.
     """
     if not isinstance(input_image, np.ndarray):
         if isinstance(input_image, torch.Tensor):
@@ -1072,6 +1110,37 @@ def tensor2im(input_image: torch.Tensor, imtype=np.uint8) -> np.ndarray:
 
 # === Main Training Function ===
 def main():
+    """
+    Main training function for the DiffUTE model.
+
+    This function orchestrates the entire training process for the DiffUTE model,
+    including:
+    1. Setting up the training environment (accelerator, logging, etc.)
+    2. Loading and preparing models (VAE, UNet, TrOCR)
+    3. Configuring optimizers and learning rate schedulers
+    4. Managing the training loop with gradient accumulation and checkpointing
+    5. Handling model saving and Hub synchronization
+
+    The training process uses a combination of models:
+    - VAE: For encoding images into latent space
+    - UNet: The main model being trained for text editing
+    - TrOCR: For text feature extraction and conditioning
+
+    The function supports various training configurations through command-line
+    arguments, including:
+    - Mixed precision training
+    - Gradient accumulation
+    - Learning rate scheduling
+    - Model checkpointing
+    - Hugging Face Hub integration
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If required model components cannot be loaded or initialized
+        RuntimeError: If training encounters critical errors
+    """
     # --- 1. Argument Parsing and Initial Setup ---
     args = parse_args()
 
@@ -1208,7 +1277,26 @@ def main():
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
         # Define hooks to be called by accelerator.save_state() and load_state()
         def save_model_hook(models, weights, output_dir):
-            """Hook to save models in diffusers format."""
+            """
+            Custom hook for saving model checkpoints during training.
+
+            This function is called by the accelerator during checkpoint saving. It handles:
+            1. Saving the EMA model if enabled
+            2. Saving the UNet model in the diffusers format
+            3. Managing checkpoint organization and cleanup
+
+            Args:
+                models (List[torch.nn.Module]): List of models to save
+                weights (List[dict]): List of state dictionaries
+                output_dir (str): Directory to save the models
+
+            Returns:
+                None
+
+            Note:
+                This hook is registered with the accelerator and called automatically
+                during training checkpoints.
+            """
             logger.info(f"Saving models to {output_dir} using custom hook.")
             if args.use_ema:
                  # Save the EMA weights separately
@@ -1224,7 +1312,26 @@ def main():
                  # models.pop() # Don't pop models, Accelerate needs it
 
         def load_model_hook(models, input_dir):
-             """Hook to load models from diffusers format."""
+             """
+             Custom hook for loading model checkpoints during training resumption.
+
+             This function is called by the accelerator when resuming training from a
+             checkpoint. It handles:
+             1. Loading the EMA model if present
+             2. Loading the UNet model in the diffusers format
+             3. Ensuring proper model configuration and state restoration
+
+             Args:
+                 models (List[torch.nn.Module]): List of models to load into
+                 input_dir (str): Directory containing the checkpoint files
+
+             Returns:
+                 None
+
+             Note:
+                 This hook is registered with the accelerator and called automatically
+                 when resuming from checkpoints.
+             """
              logger.info(f"Loading models from {input_dir} using custom hook.")
              if args.use_ema:
                  # Load EMA weights
@@ -1294,9 +1401,34 @@ def main():
     # --- 12. Define Custom Collate Function ---
     def collate_fn_ours(examples):
         """
-        Custom collate function to handle batches from OursDataset.
-        Filters out dummy examples if they exist.
-        Stacks tensors for images, masks, masked images, and text images.
+        Custom collation function for batching training examples.
+
+        This function processes a list of examples and combines them into a batch
+        suitable for training. It handles:
+        1. Image tensors
+        2. Masks for text regions
+        3. OCR features and embeddings
+        4. Additional metadata required for training
+
+        Args:
+            examples (List[dict]): List of dictionaries containing individual examples.
+                Each example should have:
+                - 'instance_images': Image tensor
+                - 'mask': Binary mask tensor
+                - 'masked_image': Masked image tensor
+                - 'ocr_embedding': Text feature embedding
+                - Additional metadata fields
+
+        Returns:
+            dict: A batch dictionary containing:
+                - 'instance_images': Batched image tensors
+                - 'mask': Batched mask tensors
+                - 'masked_image': Batched masked image tensors
+                - 'ocr_embedding': Batched text embeddings
+                All tensors are properly stacked and moved to contiguous memory format.
+
+        Raises:
+            ValueError: If examples are missing required fields or have inconsistent shapes
         """
         # Filter out potential dummy examples marked by the dataset
         valid_examples = [ex for ex in examples if not ex.get("is_dummy", False)]

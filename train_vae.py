@@ -548,17 +548,18 @@ image_trans = alb.Compose(
 # --- Custom PyTorch Dataset ---
 class OursDataset(Dataset):
     """
-    Custom PyTorch Dataset for loading images for VAE fine-tuning.
+    Custom PyTorch Dataset for training the VAE component of DiffUTE.
+    
+    This dataset class handles loading and preprocessing of images for VAE training.
+    It supports loading images from either local storage or MinIO cloud storage,
+    and applies necessary transformations to prepare the images for training.
 
-    Reads image paths from a CSV file ('data.csv') and downloads/processes
-    images using MinIO and Albumentations.
-
-    Args:
-        size (int): Target resolution for images (passed to transforms). Default is 512.
-        center_crop (bool): Whether to use center cropping instead of random cropping. Default is False.
-                           (Note: Current transforms hardcode RandomCrop, this arg is unused).
-        transform_resize_crop (alb.Compose): Albumentations pipeline for resizing/cropping and normalization.
-        transform (alb.Compose): Albumentations pipeline for final tensor conversion.
+    Attributes:
+        size (int): Target size for image resizing (default: 512).
+        center_crop (bool): Whether to apply center cropping (currently unused).
+        transform_resize_crop (alb.Compose): Albumentations transforms for resizing/cropping.
+        transform (alb.Compose): Additional Albumentations transforms.
+        image_paths (list): List of paths to all images in the dataset.
     """
 
     def __init__(
@@ -568,28 +569,39 @@ class OursDataset(Dataset):
             transform_resize_crop=None,
             transform=None,
     ):
+        """
+        Initialize the dataset with specified parameters and transformations.
+
+        Args:
+            size (int): Target size for image resizing.
+            center_crop (bool): Flag for center cropping (currently unused).
+            transform_resize_crop (alb.Compose, optional): Albumentations transforms for resizing/cropping.
+            transform (alb.Compose, optional): Additional Albumentations transforms.
+        """
         self.size = size
-        self.center_crop = center_crop  # Store but might not be used
-        self.instance_paths = []  # List to store relative paths from the CSV
-
-        # Load image paths from the CSV file
-        self._load_images_paths()
-
-        self.num_instance_images = len(self.instance_paths)
-        self._length = self.num_instance_images  # Total size of the dataset
-
-        # Store the provided Albumentations transforms
+        self.center_crop = center_crop
         self.transform_resize_crop = transform_resize_crop
         self.transform = transform
 
-        if not self.transform_resize_crop or not self.transform:
-            logger.warning("Transforms not provided to OursDataset, images will not be processed correctly.")
+        # Load all image paths during initialization
+        self.image_paths = self._load_images_paths()
 
-        logger.info(f"Loaded {self.num_instance_images} image paths for the dataset.")
+        # Set up default transforms if none provided
+        if self.transform_resize_crop is None:
+            self.transform_resize_crop = alb.Compose([
+                alb.SmallestMaxSize(max_size=size),
+                alb.CenterCrop(height=size, width=size),
+            ])
+
+        if self.transform is None:
+            self.transform = alb.Compose([
+                alb.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+                ToTensorV2(),
+            ])
 
     def __len__(self):
         """Returns the total number of images in the dataset."""
-        return self._length
+        return len(self.image_paths)
 
     def _load_images_paths(self):
         """Loads image file paths from the 'data.csv' file."""
@@ -616,14 +628,18 @@ class OursDataset(Dataset):
 
     def __getitem__(self, index):
         """
-        Gets a single data point (processed image) from the dataset.
+        Get a single item from the dataset.
 
         Args:
-            index (int): The index of the data point to retrieve.
+            index (int): Index of the item to retrieve.
 
         Returns:
-            dict: A dictionary containing the processed image tensor under the key "instance_images".
-                  Returns an empty dict or raises error if loading/processing fails.
+            dict: A dictionary containing:
+                - 'pixel_values': Preprocessed image tensor normalized to [-1, 1]
+                - 'index': Original index in the dataset
+
+        Raises:
+            Exception: If image loading or processing fails.
         """
         example = {}
         # Use modulo operator for safety, although index should be within bounds

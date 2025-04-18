@@ -636,14 +636,21 @@ image_trans = alb.Compose(
 
 def draw_text(im_shape, text):
     """
-    Renders text on a white background using a specified font.
+    Renders text onto a blank image using a specified font.
+
+    This function creates a new image with the same dimensions as the input shape,
+    renders the provided text using the Arial Unicode font, and returns the rendered
+    image. The text is rendered in black on a white background.
 
     Args:
-        im_shape (tuple): Shape of the target image (width, height)
-        text (str): Text to render
+        im_shape (tuple): Shape of the target image (height, width, channels).
+        text (str): Text to render.
 
     Returns:
-        np.ndarray: Rendered text image as numpy array
+        np.ndarray: RGB image array with rendered text.
+
+    Raises:
+        ValueError: If the font file is not found or text rendering fails.
     """
     # Set font parameters
     font_size = 40  
@@ -664,14 +671,21 @@ def draw_text(im_shape, text):
 
 def process_location(location, instance_image_size):
     """
-    Processes and adjusts text region location coordinates.
+    Processes and validates text region coordinates.
+
+    This function takes the coordinates of a text region and ensures they are valid
+    within the image boundaries. It also applies padding and other adjustments to
+    improve text region selection.
 
     Args:
-        location (list): Original coordinates [x0, y0, x1, y1]
-        instance_image_size (tuple): Image dimensions
+        location (list): [x_min, y_min, x_max, y_max] coordinates of text region.
+        instance_image_size (tuple): (height, width, channels) of the image.
 
     Returns:
-        list: Adjusted coordinates
+        list: Processed [x_min, y_min, x_max, y_max] coordinates.
+
+    Raises:
+        ValueError: If coordinates are invalid or outside image boundaries.
     """
     h = location[3] - location[1]
     location[3] = min(location[3] + h / 10, instance_image_size[0] - 1)
@@ -680,14 +694,21 @@ def process_location(location, instance_image_size):
 
 def generate_mask(im_shape, ocr_locate):
     """
-    Creates a binary mask for the text region.
+    Generates a binary mask for text regions in an image.
+
+    Creates a mask where text regions (specified by OCR locations) are marked as
+    white (255) on a black (0) background. The mask can be used to identify
+    regions that need to be edited or preserved during image processing.
 
     Args:
-        im_shape (tuple): Shape of the target image (width, height)
-        ocr_locate (list): Coordinates [x0, y0, x1, y1] for text region
+        im_shape (tuple): Shape of the target image (height, width).
+        ocr_locate (list): List of text region coordinates [x_min, y_min, x_max, y_max].
 
     Returns:
-        np.ndarray: Binary mask array
+        np.ndarray: Binary mask array where text regions are marked as 255.
+
+    Raises:
+        ValueError: If shape or coordinates are invalid.
     """
     # Create empty mask
     mask = Image.new("L", im_shape, 0)
@@ -703,14 +724,21 @@ def generate_mask(im_shape, ocr_locate):
 
 def prepare_mask_and_masked_image(image, mask):
     """
-    Prepares masked version of input image.
+    Prepares a masked version of an input image.
+
+    This function applies a binary mask to an image, creating a version where
+    the masked regions (text areas) are blacked out. This is used to prepare
+    inputs for the inpainting model.
 
     Args:
-        image (np.ndarray): Input image
-        mask (np.ndarray): Binary mask
+        image (np.ndarray): Original image array (RGB).
+        mask (np.ndarray): Binary mask array where text regions are marked.
 
     Returns:
-        np.ndarray: Masked image with text region removed
+        np.ndarray: Image with text regions masked out.
+
+    Raises:
+        ValueError: If image and mask shapes don't match.
     """
     masked_image = np.multiply(
         image, np.stack([mask < 0.5, mask < 0.5, mask < 0.5]).transpose(1, 2, 0)
@@ -719,23 +747,45 @@ def prepare_mask_and_masked_image(image, mask):
 
 
 def download_oss_file_pcache(my_file="xxx"):
+    """
+    Downloads a file from OSS using pcache.
+
+    This function is a legacy implementation for downloading files from OSS
+    storage using pcache. It's recommended to use MinIO client instead.
+
+    Args:
+        my_file (str): Path to the file in OSS storage.
+
+    Returns:
+        np.ndarray: Downloaded file content as a NumPy array.
+
+    Raises:
+        Exception: If download or file processing fails.
+
+    Note:
+        This function is deprecated and should be replaced with MinIO client usage.
+    """
     # This function is no longer needed as we're not using OSS
     pass
 
 
-def get_full_repo_name(
-    model_id: str, organization: Optional[str] = None, token: Optional[str] = None
-):
+def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     """
-    Gets full repository name for Hugging Face Hub.
+    Constructs the full repository name for Hugging Face Hub.
+
+    This function takes a model ID and optional organization name to construct
+    the full repository name used for pushing models to the Hugging Face Hub.
 
     Args:
-        model_id (str): Base model ID
-        organization (str, optional): Organization name
-        token (str, optional): HF API token
+        model_id (str): Base name/ID for the model.
+        organization (str, optional): Organization name on Hugging Face Hub.
+        token (str, optional): Authentication token for Hugging Face Hub.
 
     Returns:
-        str: Full repository name
+        str: Full repository name (e.g., "organization/model-id").
+
+    Raises:
+        ValueError: If required authentication information is missing.
     """
     if token is None:
         token = HfFolder.get_token()
@@ -748,13 +798,20 @@ def get_full_repo_name(
 
 def numpy_to_pil(images):
     """
-    Converts numpy image array(s) to PIL Image(s).
+    Converts NumPy image arrays to PIL Image objects.
+
+    This function handles the conversion of one or more images from NumPy array
+    format to PIL Image objects, including necessary normalization and type
+    conversion.
 
     Args:
-        images (np.ndarray): Image array(s) in numpy format
+        images (np.ndarray): Single image or batch of images as NumPy arrays.
 
     Returns:
-        list: List of PIL Images
+        list: List of PIL Image objects.
+
+    Raises:
+        ValueError: If input array format is invalid.
     """
     if images.ndim == 3:
         images = images[None, ...]
@@ -770,14 +827,20 @@ def numpy_to_pil(images):
 
 def tensor2im(input_image, imtype=np.uint8):
     """
-    Converts a Tensor array into a numpy image array.
+    Converts a PyTorch tensor to a NumPy image array.
+
+    This function handles the conversion of image data from PyTorch tensor format
+    to NumPy array format, including denormalization and type conversion.
 
     Args:
-        input_image (tensor/np.ndarray): Input image
-        imtype (type): Desired output numpy dtype
+        input_image (torch.Tensor): Input image tensor.
+        imtype (np.dtype): Target NumPy data type (default: np.uint8).
 
     Returns:
-        np.ndarray: Converted image array
+        np.ndarray: Image array in specified format.
+
+    Raises:
+        ValueError: If input tensor format is invalid.
     """
     if not isinstance(input_image, np.ndarray):
         if isinstance(input_image, torch.Tensor):
@@ -807,17 +870,24 @@ def randn_tensor(
     layout: Optional["torch.layout"] = None,
 ):
     """
-    Creates random tensors with specified parameters.
+    Generates a tensor with random values from a normal distribution.
+
+    This function creates a tensor of the specified shape filled with random values
+    from a normal (Gaussian) distribution. It supports multiple generators for
+    distributed training scenarios.
 
     Args:
-        shape (tuple/list): Desired tensor shape
-        generator (torch.Generator, optional): Random number generator
-        device (torch.device, optional): Target device
-        dtype (torch.dtype, optional): Desired data type
-        layout (torch.layout, optional): Tensor layout
+        shape (Union[Tuple, List]): Shape of the tensor to generate.
+        generator (Optional[Union[List[torch.Generator], torch.Generator]]): Random number generator(s).
+        device (Optional[torch.device]): Device to place the tensor on.
+        dtype (Optional[torch.dtype]): Data type of the tensor.
+        layout (Optional[torch.layout]): Memory layout of the tensor.
 
     Returns:
-        torch.Tensor: Random tensor with specified properties
+        torch.Tensor: Randomly initialized tensor.
+
+    Note:
+        If multiple generators are provided, they should match the batch size (first dimension).
     """
     # device on which tensor is created defaults to device
     rand_device = device
@@ -1062,60 +1132,23 @@ else:
 
 def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     """
-    Main text editing pipeline that generates edited image with new text.
-    
-    This function demonstrates how the trained VAE and UNet work together:
-    
-    1. VAE's Role (AutoencoderKL):
-       - Converts high-dimensional images (H×W×3) to low-dimensional latents (h×w×4)
-       - Typically reduces spatial dimensions by factor of 8 (vae_scale_factor)
-       - Helps maintain global image structure during editing
-       - Uses deterministic encoding during inference
-    
-    2. UNet's Role:
-       - Works in the latent space created by VAE
-       - Performs denoising steps guided by:
-         * Text embeddings from TrOCR
-         * Masked image information
-         * Original image context
-       - Progressive refinement through multiple steps
-    
-    3. Diffusion Process:
-       - Starts with pure noise in the text region
-       - Each step gradually denoises and refines the text
-       - Uses noise_scheduler to manage the denoising schedule
-       - Number of steps controlled by slider_step parameter
-    
-    4. Text Conditioning:
-       - TrOCR generates embeddings from target text
-       - These embeddings guide the UNet's generation
-       - Helps maintain text style and appearance
-    
+    Performs text editing in an image using the DiffUTE model.
+
+    This function takes an input image and coordinates of a text region, and replaces
+    the text in that region with new text while preserving the surrounding context.
+    It uses a combination of VAE and UNet models to achieve high-quality text editing.
+
     Args:
-        text (str): New text to render in the image
-        instance_image (np.ndarray): Original input image
-        slider_step (int): Number of diffusion steps for generation
-        x0, y0, x1, y1 (float): Coordinates defining the text region to edit
-    
+        text (str): New text to render in the image.
+        instance_image (PIL.Image): Input image to edit.
+        slider_step (int): Number of diffusion steps for generation.
+        x0, y0, x1, y1 (int): Coordinates defining the text region to edit.
+
     Returns:
-        tuple: (edited_image, mask) where:
-            - edited_image (PIL.Image): Final image with edited text
-            - mask (np.ndarray): Binary mask showing edited region
-    
-    Training Background:
-    -------------------
-    The models used here were trained in two stages:
-    
-    1. VAE Training:
-       - Trained to minimize reconstruction loss
-       - Learned to create efficient latent representations
-       - Now frozen and used only for encoding/decoding
-    
-    2. UNet Training:
-       - Trained on progressively noised images
-       - Learned to predict and remove noise
-       - Conditioned on text embeddings for guidance
-       - Uses masked regions for targeted editing
+        PIL.Image: Edited image with the new text.
+
+    Raises:
+        ValueError: If input parameters are invalid or model inference fails.
     """
     # Initialize models and components
     examples = {}
@@ -1356,15 +1389,22 @@ ROI_coordinates = {
 
 def get_select_coordinates(img, x0, y0, x1, y1, evt: gr.SelectData):
     """
-    Handles coordinate selection from user clicks in the UI.
+    Handles coordinate selection events from the Gradio interface.
+
+    This function processes coordinate selection events from the user interface,
+    storing and validating the coordinates for text region selection.
 
     Args:
-        img: Input image
-        x0, y0, x1, y1: Current coordinates
-        evt (gr.SelectData): Click event data
+        img (PIL.Image): The image being processed.
+        x0, y0, x1, y1 (int): Current coordinates of the selection.
+        evt (gr.SelectData): Event data from Gradio containing new coordinates.
 
     Returns:
-        tuple: Updated image annotations and coordinates
+        tuple: Updated coordinates (x0, y0, x1, y1) and status message.
+
+    Note:
+        This function is designed to work with Gradio's event system for
+        interactive image selection.
     """
     sections = []
     # update new coordinates
