@@ -1,3 +1,35 @@
+"""
+DiffUTE: Universal Text Editing Diffusion Model
+
+This module implements a text editing pipeline using diffusion models to edit text in images.
+Main components:
+- Text region detection and masking
+- Text rendering using TrOCR
+- Diffusion-based image generation 
+- Interactive UI for region selection and text editing
+
+The module uses several key models:
+- VAE (AutoencoderKL) for image encoding/decoding
+- UNet2D for diffusion
+- TrOCR for text recognition
+- DDPMScheduler for diffusion scheduling
+
+Key features:
+- Interactive region selection
+- Custom text rendering
+- Mask generation
+- Diffusion-based image editing
+
+Dependencies:
+- PyTorch
+- Diffusers
+- Gradio
+- Transformers
+- OpenCV
+- PIL
+- Albumentations
+"""
+
 import gradio as gr
 import numpy as np
 import os
@@ -7,7 +39,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFile
 import argparse
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple, Union
 import accelerate
 import datasets
 import torch
@@ -370,46 +402,86 @@ image_trans = alb.Compose(
 
 
 def draw_text(im_shape, text):
-    font_size = 40
-    font_file = "arialuni.ttf"
-    len_text = len(text)
-    if len_text == 0:
-        len_text = 3
-    img = Image.new("RGB", ((len_text + 2) * font_size, 60), color="white")
-    # Define the font object
-    font = ImageFont.truetype(font_file, font_size)
-    # Define the text and position
-    pos = (40, 10)
+    """
+    Renders text on a white background using a specified font.
 
+    Args:
+        im_shape (tuple): Shape of the target image (width, height)
+        text (str): Text to render
+
+    Returns:
+        np.ndarray: Rendered text image as numpy array
+    """
+    # Set font parameters
+    font_size = 40  
+    font_file = "arialuni.ttf"
+    len_text = len(text) if len(text) > 0 else 3
+
+    # Create white background image
+    img = Image.new("RGB", ((len_text + 2) * font_size, 60), color="white")
+    
+    # Load font and draw text
+    font = ImageFont.truetype(font_file, font_size)
+    pos = (40, 10)
     draw = ImageDraw.Draw(img)
     draw.text(pos, text, font=font, fill="black")
-    img = np.array(img)
-
-    return img
+    
+    return np.array(img)
 
 
 def process_location(location, instance_image_size):
+    """
+    Processes and adjusts text region location coordinates.
+
+    Args:
+        location (list): Original coordinates [x0, y0, x1, y1]
+        instance_image_size (tuple): Image dimensions
+
+    Returns:
+        list: Adjusted coordinates
+    """
     h = location[3] - location[1]
     location[3] = min(location[3] + h / 10, instance_image_size[0] - 1)
     return location
 
 
 def generate_mask(im_shape, ocr_locate):
+    """
+    Creates a binary mask for the text region.
+
+    Args:
+        im_shape (tuple): Shape of the target image (width, height)
+        ocr_locate (list): Coordinates [x0, y0, x1, y1] for text region
+
+    Returns:
+        np.ndarray: Binary mask array
+    """
+    # Create empty mask
     mask = Image.new("L", im_shape, 0)
     draw = ImageDraw.Draw(mask)
+    
+    # Draw rectangle for text region
     draw.rectangle(
         (ocr_locate[0], ocr_locate[1], ocr_locate[2], ocr_locate[3]),
         fill=1,
     )
-    mask = np.array(mask)
-    return mask
+    return np.array(mask)
 
 
 def prepare_mask_and_masked_image(image, mask):
+    """
+    Prepares masked version of input image.
+
+    Args:
+        image (np.ndarray): Input image
+        mask (np.ndarray): Binary mask
+
+    Returns:
+        np.ndarray: Masked image with text region removed
+    """
     masked_image = np.multiply(
         image, np.stack([mask < 0.5, mask < 0.5, mask < 0.5]).transpose(1, 2, 0)
     )
-
     return masked_image
 
 
@@ -421,6 +493,17 @@ def download_oss_file_pcache(my_file="xxx"):
 def get_full_repo_name(
     model_id: str, organization: Optional[str] = None, token: Optional[str] = None
 ):
+    """
+    Gets full repository name for Hugging Face Hub.
+
+    Args:
+        model_id (str): Base model ID
+        organization (str, optional): Organization name
+        token (str, optional): HF API token
+
+    Returns:
+        str: Full repository name
+    """
     if token is None:
         token = HfFolder.get_token()
     if organization is None:
@@ -432,42 +515,51 @@ def get_full_repo_name(
 
 def numpy_to_pil(images):
     """
-    Convert a numpy image or a batch of images to a PIL image.
+    Converts numpy image array(s) to PIL Image(s).
+
+    Args:
+        images (np.ndarray): Image array(s) in numpy format
+
+    Returns:
+        list: List of PIL Images
     """
     if images.ndim == 3:
         images = images[None, ...]
     images = (images * 255).round().astype("uint8")
+    
     if images.shape[-1] == 1:
-        # special case for grayscale (single channel) images
+        # Handle grayscale images
         pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
     else:
         pil_images = [Image.fromarray(image) for image in images]
-
     return pil_images
 
 
 def tensor2im(input_image, imtype=np.uint8):
-    """ "Converts a Tensor array into a numpy image array.
+    """
+    Converts a Tensor array into a numpy image array.
 
-    Parameters:
-        input_image (tensor) --  the input image tensor array
-        imtype (type)        --  the desired type of the converted numpy array
+    Args:
+        input_image (tensor/np.ndarray): Input image
+        imtype (type): Desired output numpy dtype
+
+    Returns:
+        np.ndarray: Converted image array
     """
     if not isinstance(input_image, np.ndarray):
-        if isinstance(input_image, torch.Tensor):  # get the data from a variable
+        if isinstance(input_image, torch.Tensor):
             image_tensor = input_image.data
         else:
             return input_image
-        image_numpy = (
-            image_tensor[0].cpu().float().numpy()
-        )  # convert it into a numpy array
-        if image_numpy.shape[0] == 1:  # grayscale to RGB
+        
+        # Convert tensor to numpy and process
+        image_numpy = image_tensor[0].cpu().float().numpy()
+        if image_numpy.shape[0] == 1:
             image_numpy = np.tile(image_numpy, (3, 1, 1))
-        image_numpy = (
-            (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
-        )  # post-processing: tranpose and scaling
-    else:  # if it is a numpy array, do nothing
+        image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
+    else:
         image_numpy = input_image
+        
     return image_numpy.astype(imtype)
 
 
@@ -481,9 +573,18 @@ def randn_tensor(
     dtype: Optional["torch.dtype"] = None,
     layout: Optional["torch.layout"] = None,
 ):
-    """This is a helper function that allows to create random tensors on the desired `device` with the desired `dtype`. When
-    passing a list of generators one can seed each batched size individually. If CPU generators are passed the tensor
-    will always be created on CPU.
+    """
+    Creates random tensors with specified parameters.
+
+    Args:
+        shape (tuple/list): Desired tensor shape
+        generator (torch.Generator, optional): Random number generator
+        device (torch.device, optional): Target device
+        dtype (torch.dtype, optional): Desired data type
+        layout (torch.layout, optional): Tensor layout
+
+    Returns:
+        torch.Tensor: Random tensor with specified properties
     """
     # device on which tensor is created defaults to device
     rand_device = device
@@ -727,6 +828,26 @@ else:
 
 
 def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
+    """
+    Main text editing pipeline that generates edited image with new text.
+    
+    This function implements the core text editing pipeline:
+    1. Prepares input image and text region
+    2. Generates text mask
+    3. Applies diffusion model for text generation
+    4. Post-processes and combines results
+    
+    Args:
+        text (str): New text to render in the image
+        instance_image (np.ndarray): Original input image
+        slider_step (int): Number of diffusion steps for generation
+        x0, y0, x1, y1 (float): Coordinates defining the text region to edit
+    
+    Returns:
+        tuple: (edited_image, mask) where:
+            - edited_image (PIL.Image): Final image with edited text
+            - mask (np.ndarray): Binary mask showing edited region
+    """
     examples = {}
     noise_scheduler_te = noise_scheduler
     processor_te = processor
@@ -734,17 +855,17 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     vae_te = vae
     unet_te = unet
 
+    # Process text region coordinates
     bbox = [x0, y0, x1, y1]
-
     location = np.int32(bbox)
 
-    # crop scale对结果影响很大，可根据本批数据集进行微调
+    # Calculate dimensions for cropping
     char_height = location[3] - location[1]
     char_lenth = location[2] - location[0]
-
     h, w, c = instance_image.shape
     short_side = min(h, w)
 
+    # Determine crop size based on text height
     if 6 * char_height < 128:
         CROP_LENTH = max(128, char_lenth)
     elif 6 * char_height < 256:
@@ -762,7 +883,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     else:
         CROP_LENTH = 6 * char_height
 
-    # 字体区域的长度 < 则按预设的crop值 > 则按规则取
+    # Adjust crop size based on text length and image dimensions
     if char_lenth < CROP_LENTH:
         crop_scale = min(CROP_LENTH, short_side)
     else:
@@ -770,8 +891,11 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
 
     _text_te, _ori_text = text, text
 
+    # Generate mask and prepare masked image
     mask = generate_mask(instance_image.shape[:2][::-1], location)
     masked_image = prepare_mask_and_masked_image(instance_image, mask)
+    
+    # Calculate crop coordinates
     x1, y1, x2, y2 = location
     if x2 - x1 < crop_scale:
         if x2 - crop_scale > 0:
@@ -793,16 +917,13 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     else:
         y_s = np.random.randint(y1, max(0, y2 - crop_scale - 1))
 
+    # Prepare images for processing
     draw_ttf = draw_text(instance_image.shape[:2][::-1], text)
     instance_image_1 = instance_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
     mask_crop = mask[y_s : y_s + crop_scale, x_s : x_s + crop_scale]
     masked_image_crop = masked_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
 
-    # cv2.imwrite('ttf.jpg', draw_ttf)
-    # cv2.imwrite('instance_image_1.jpg', instance_image_1)
-    # cv2.imwrite('mask_crop.jpg', mask_crop*255)
-    # cv2.imwrite('masked_image_crop.jpg', masked_image_crop)
-
+    # Apply image transformations
     augmented = image_trans_resize_and_crop(image=instance_image_1)
     instance_image_1 = augmented["image"]
     augmented = image_trans(image=instance_image_1)
@@ -824,6 +945,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     augmented = image_trans(image=draw_ttf)
     draw_ttf = augmented["image"]
 
+    # Store processed images
     examples["ori_image"] = instance_image
     examples["instance_images"] = instance_image_1
     examples["mask"] = mask_crop
@@ -831,6 +953,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     examples["ttf_img"] = draw_ttf
     examples["crop_scale"] = crop_scale
 
+    # Prepare tensors for model input
     input_values = instance_image_1.unsqueeze(0)
     input_values = input_values.to(memory_format=torch.contiguous_format).float()
     input_values = input_values.cuda()
@@ -843,19 +966,19 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     ttf_imgs.append(draw_ttf)
 
     with torch.no_grad():
+        # Generate text features using TrOCR
         pixel_values = processor_te(images=ttf_imgs, return_tensors="pt").pixel_values
         pixel_values = pixel_values.cuda()
         ocr_feature = trocr_model_te(pixel_values)
         ocr_embeddings = ocr_feature.last_hidden_state.detach()
-        print(type(ocr_embeddings))
 
+        # Prepare latent representations
         vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
-        # Convert images to latent space
         latents = vae_te.encode(input_values.to(weight_dtype)).latent_dist.sample()
         latents = latents * vae_te.config.scaling_factor
         torch.randn_like(latents)
 
-        # Rex: prepare mask && mask latent as input of UNET
+        # Process mask for latent space
         width, height, *_ = mask_crop.size()[::-1]
         mask_crop = torch.nn.functional.interpolate(
             mask_crop,
@@ -863,9 +986,11 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         )
         mask_crop = mask_crop.to(weight_dtype)
 
+        # Generate masked image latents
         masked_image_latents = vae.encode(masked_image_crop).latent_dist.sample()
         masked_image_latents = masked_image_latents * vae.config.scaling_factor
 
+        # Setup shape for generation
         shape = (
             1,
             vae.config.latent_channels,
@@ -873,20 +998,20 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
             width // vae_scale_factor,
         )
 
+        # Initialize noise for diffusion
         latents = randn_tensor(
             shape, generator=torch.manual_seed(0), dtype=weight_dtype
         )
-        # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * noise_scheduler_te.init_noise_sigma
         latents = latents.cuda()
 
+        # Run diffusion process
         noise_scheduler_te.set_timesteps(int(slider_step))
         timesteps = noise_scheduler_te.timesteps
 
         for i, t in enumerate(timesteps):
-            # expand the latents if we are doing classifier free guidance
+            # Prepare model input
             latent_model_input = latents
-            # concat latents, mask, masked_image_latents in the channel dimension
             latent_model_input = noise_scheduler_te.scale_model_input(
                 latent_model_input, t
             )
@@ -894,20 +1019,20 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
                 [latent_model_input, mask_crop, masked_image_latents], dim=1
             )
 
-            # predict the noise residual
+            # Generate noise prediction
             noise_pred = unet_te(latent_model_input, t, ocr_embeddings).sample
-            # compute the previous noisy sample x_t -> x_t-1
             latents = noise_scheduler_te.step(noise_pred, t, latents).prev_sample
-        # 11. Post-processing
+
+        # Decode generated image
         pred_latents = 1 / vae_te.config.scaling_factor * latents
         image_vae = vae_te.decode(pred_latents).sample
 
-        # 13. Convert to PIL
+        # Post-process generated image
         image = (image_vae / 2 + 0.5) * 255.0
         image = image.cpu().permute(0, 2, 3, 1).float().detach().numpy()
         image = image.squeeze(0)
 
-        # h, w, _ = instance_image.shape
+        # Calculate final dimensions
         if y_s + crop_scale > h:
             r_h = h - y_s
         else:
@@ -918,6 +1043,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         else:
             r_w = crop_scale
 
+        # Combine generated image with original
         inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
         mid_inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
         mid_inf_res[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :] = cv2.resize(
@@ -925,14 +1051,8 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         )
         inf_res[y1:y2, x1:x2, :] = mid_inf_res[y1:y2, x1:x2, :]
 
-        # generated_text_imgs = inf_res[y1:y2, x1:x2, :]
-        # pixel_values = processor_te(images=generated_text_imgs, return_tensors="pt").pixel_values
-        # pixel_values = pixel_values.cuda()
-        # generated_ids = full_trocr_model_te.generate(pixel_values)
-        # generated_text = processor_te.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        # print(generated_text)
+        # Convert to final format
         inf_res = inf_res.round().astype("uint8")
-        print(type(inf_res), type(mask))
         inf_res = Image.fromarray(inf_res).convert("RGB")
         ori_comp = instance_image.cpu().permute(1, 2, 0).float().numpy()
         ori_comp = Image.fromarray(ori_comp.round().astype("uint8")).convert("RGB")
@@ -940,16 +1060,28 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     return inf_res, mask * 255
 
 
+# Global state for ROI selection
 ROI_coordinates = {
-    "x_temp": 0,
-    "y_temp": 0,
-    "x_new": 0,
-    "y_new": 0,
-    "clicks": 0,
+    "x_temp": 0,  # Temporary x coordinate
+    "y_temp": 0,  # Temporary y coordinate
+    "x_new": 0,   # New x coordinate from click
+    "y_new": 0,   # New y coordinate from click
+    "clicks": 0,  # Click counter for ROI selection
 }
 
 
 def get_select_coordinates(img, x0, y0, x1, y1, evt: gr.SelectData):
+    """
+    Handles coordinate selection from user clicks in the UI.
+
+    Args:
+        img: Input image
+        x0, y0, x1, y1: Current coordinates
+        evt (gr.SelectData): Click event data
+
+    Returns:
+        tuple: Updated image annotations and coordinates
+    """
     sections = []
     # update new coordinates
     ROI_coordinates["clicks"] += 1
@@ -1008,32 +1140,41 @@ def get_select_coordinates(img, x0, y0, x1, y1, evt: gr.SelectData):
         return (img, sections), x0, y0, x1, y1
 
 
+# Initialize Gradio interface with components
 with gr.Blocks() as demo:
     gr.Markdown("DiffUTE: Universal Text Editing Diffusion Model")
+    
+    # Main text editing interface tab
     with gr.Tab("Text editing pipeline"):
         with gr.Row():
+            # Left column - Input controls
             with gr.Column():
+                # Image input and text controls
                 ori_image = gr.Image(label="Original image")
                 text_input = gr.Textbox(label="Input the text you want to write here")
                 img_output = gr.AnnotatedImage(
                     label="ROI", color_map={"Click second point for ROI": "#f44336"}
                 )
                 button = gr.Button("Generate", variant="primary")
+                
+                # Coordinate display
                 with gr.Row():
                     x0 = gr.Number(label="X0")
                     x1 = gr.Number(label="X1")
                     y0 = gr.Number(label="Y0")
                     y1 = gr.Number(label="Y1")
+                
+                # Example configurations for demonstration
                 text_edit_examples = [
                     [
-                        "2023-07-25",
-                        "./examples/1793.jpg",
-                        "150",
-                        "204",
-                        "240",
-                        "333",
-                        "270",
-                        "512",
+                        "2023-07-25",  # Text to render
+                        "./examples/1793.jpg",  # Image path
+                        "150",  # Steps
+                        "204",  # x0
+                        "240",  # y0
+                        "333",  # x1
+                        "270",  # y1
+                        "512",  # Resolution
                     ],
                     [
                         "ANT",
@@ -1066,6 +1207,8 @@ with gr.Blocks() as demo:
                         "640",
                     ],
                 ]
+                
+                # Inference step slider
                 ute_steps = gr.Slider(
                     20.0,
                     200.0,
@@ -1075,15 +1218,18 @@ with gr.Blocks() as demo:
                     info="The step of denoising process.",
                 )
 
+                # Load example configurations
                 gr.Examples(
                     text_edit_examples,
                     inputs=[text_input, ori_image, ute_steps, x0, y0, x1, y1],
                 )
 
+            # Right column - Output display
             with gr.Column():
                 output_imgs = gr.Image(label="Generated image")
                 output_masks = gr.Image(label="Generated mask")
 
+    # Event handlers for UI interactions
     ori_image.select(
         get_select_coordinates,
         [ori_image, x0, y0, x1, y1],
@@ -1096,4 +1242,5 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
+    # Launch Gradio interface with debugging and queue enabled
     demo.launch(debug=True, enable_queue=True)
