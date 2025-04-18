@@ -1,8 +1,5 @@
 import gradio as gr
-from aistudio_notebook.ui import gradio
 import io
-from pcache_fileio import fileio
-from pcache_fileio.oss_conf import OssConfigFactory
 import pandas as pd
 import numpy as np
 import os, cv2
@@ -10,13 +7,6 @@ import pandas as pd
 import json
 from pandas import Series,DataFrame
 from PIL import Image, ImageDraw, ImageFont, ImageFile
-OSS_CONF_NAME = "oss_conf_1" # Optional, name of your oss configure
-OSS_ID = ""# Your oss id
-OSS_KEY = ""# Your oss key
-OSS_ENDPOINT = ""# Your oss endpoint
-OSS_BUCKET = ""# Your oss bucket name
-OSS_PCACHE_ROOT_DIR = "oss://" + OSS_BUCKET
-OssConfigFactory.register(OSS_ID, OSS_KEY, OSS_ENDPOINT, OSS_CONF_NAME)
 
 import argparse
 import logging
@@ -56,7 +46,7 @@ from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, deprecate
 from diffusers.utils.import_utils import is_xformers_available
 import torch.multiprocessing
-import cv2
+
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -383,12 +373,8 @@ def prepare_mask_and_masked_image(image, mask):
     return masked_image
 
 def download_oss_file_pcache(my_file = "xxx"):
-    MY_FILE_PATH = os.path.join(OSS_PCACHE_ROOT_DIR, my_file)
-    with fileio.file_io_impl.open(MY_FILE_PATH, "rb") as fd:
-        content = fd.read()
-    img = np.frombuffer(content, dtype=np.int8)
-    img = cv2.imdecode(img, flags=1)
-    return img
+    # This function is no longer needed as we're not using OSS
+    pass
 
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
@@ -893,7 +879,6 @@ def get_select_coordinates(img, x0, y0, x1, y1, evt: gr.SelectData):
 with gr.Blocks() as demo:
     gr.Markdown("DiffUTE: Universal Text Editing Diffusion Model")
     with gr.Tab("Text editing pipeline"):
-        # with gr.Column():
         with gr.Row():
             with gr.Column():
                 ori_image = gr.Image(label='Original image')
@@ -915,14 +900,12 @@ with gr.Blocks() as demo:
                 
                 gr.Examples(text_edit_examples,inputs=[text_input, ori_image, ute_steps, x0,y0,x1,y1])
                 
-                
-                
             with gr.Column():
                 output_imgs = gr.Image(label='Generated image')
                 output_masks = gr.Image(label='Generated mask')
             
-                
     ori_image.select(get_select_coordinates, [ori_image, x0, y0, x1, y1], [img_output, x0, y0, x1, y1])
     button.click(text_editing, inputs=[text_input, ori_image, ute_steps, x0,y0,x1,y1], outputs=[output_imgs, output_masks])
 
-gradio.launch(demo, debug=True, enable_queue=True)
+if __name__ == "__main__":
+    demo.launch(debug=True, enable_queue=True)
