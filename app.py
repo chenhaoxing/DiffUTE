@@ -1,33 +1,97 @@
 """
 DiffUTE: Universal Text Editing Diffusion Model
 
-This module implements a text editing pipeline using diffusion models to edit text in images.
-Main components:
-- Text region detection and masking
-- Text rendering using TrOCR
-- Diffusion-based image generation 
-- Interactive UI for region selection and text editing
+A comprehensive text editing system that uses diffusion models to modify text in images
+while preserving the surrounding context. This implementation provides a user-friendly
+interface for text editing tasks in images.
 
-The module uses several key models:
-- VAE (AutoencoderKL) for image encoding/decoding
-- UNet2D for diffusion
-- TrOCR for text recognition
-- DDPMScheduler for diffusion scheduling
+Detailed Process Overview:
+-------------------------
+1. Image and Region Selection
+   - User selects an image and specifies the region containing text to edit
+   - The system captures coordinates (x0, y0, x1, y1) of the selected region
+   - These coordinates help focus the editing process on the relevant area
 
-Key features:
-- Interactive region selection
-- Custom text rendering
-- Mask generation
-- Diffusion-based image editing
+2. Text Input and Preprocessing
+   - User provides new text to replace the existing text
+   - The system renders this text using a specified font (arialuni.ttf)
+   - The rendered text serves as a guide for the diffusion model
 
-Dependencies:
-- PyTorch
-- Diffusers
-- Gradio
-- Transformers
-- OpenCV
-- PIL
-- Albumentations
+3. Mask Generation
+   - A binary mask is created based on the selected region
+   - White (1) represents the area to edit, black (0) represents area to preserve
+   - This mask helps the model understand which parts of the image to modify
+
+4. Image Processing and Cropping
+   - The system crops the image around the text region with padding
+   - Cropping helps focus computation on the relevant area
+   - Various image sizes are handled through adaptive cropping logic
+
+5. Diffusion Model Process (Core Technology)
+   - The diffusion model works by gradually denoising an image:
+     a. Start with pure noise in the text region
+     b. Gradually refine this noise into meaningful text
+     c. Use the provided new text as guidance
+   - Key steps in diffusion:
+     * Forward process: Not used during inference
+     * Reverse process: Gradually removes noise to create the new text
+     * Guidance: Uses TrOCR features to ensure the generated content matches the desired text
+
+6. Technical Components
+   - VAE (Variational AutoEncoder):
+     * Compresses images into a smaller latent space
+     * Makes it easier for the diffusion model to work
+   - UNet:
+     * The main architecture for the diffusion process
+     * Predicts noise at each step of denoising
+   - TrOCR:
+     * Transformer-based OCR model
+     * Provides features to guide the text generation
+
+7. Post-Processing
+   - The generated text region is carefully blended back into the original image
+   - Resolution and dimensions are matched to ensure seamless integration
+   - The final image maintains the original context while showing the new text
+
+Key Concepts for Beginners:
+--------------------------
+- Diffusion Models: Think of these as models that learn to gradually clean up noise
+  into meaningful images. Like slowly revealing a picture through fog.
+  
+- Latent Space: A compressed representation of images where the model works.
+  Similar to how a jpeg compresses an image, but optimized for AI operations.
+  
+- Masks: Like stencils in painting, they tell the model which parts of the image
+  to modify and which to leave unchanged.
+  
+- Guidance: The process of telling the model what kind of text to generate.
+  Similar to having a reference while drawing.
+
+Usage Example:
+-------------
+1. Load an image with text you want to edit
+2. Select the text region by clicking two points to form a rectangle
+3. Enter the new text you want to appear in that region
+4. Adjust the number of diffusion steps if needed (more steps = potentially better quality)
+5. Click generate to create the edited image
+
+The system will handle all the complex processing while providing a simple interface
+for users to perform sophisticated text editing tasks.
+
+Dependencies and Models:
+----------------------
+- PyTorch: Deep learning framework
+- Diffusers: Library for diffusion models
+- Transformers: For text processing
+- Gradio: Web interface
+- OpenCV & PIL: Image processing
+- Albumentations: Image augmentation
+
+Note: The quality of results can depend on factors like:
+- Text region size and location
+- Complexity of the background
+- Number of diffusion steps
+- Resolution of the input image
 """
 
 import gradio as gr
