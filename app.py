@@ -5,6 +5,127 @@ A comprehensive text editing system that uses diffusion models to modify text in
 while preserving the surrounding context. This implementation provides a user-friendly
 interface for text editing tasks in images.
 
+Model Architecture and Training Process:
+--------------------------------------
+The system uses two key neural networks that work together:
+
+1. VAE (Variational AutoEncoder):
+   - Purpose: Compresses images into a compact latent space and reconstructs them
+   - Training Process:
+     * Input: Original high-dimensional images
+     * Output: Reconstructed images
+     * Loss: Mean Squared Error between input and output
+     * Key Feature: Creates a compressed "latent space" representation
+   - Why it's needed:
+     * Reduces computational complexity for the diffusion process
+     * Creates a more manageable space for the diffusion model to work in
+     * Helps maintain image structure and features during editing
+
+2. UNet (with Diffusion):
+   - Purpose: Performs the actual text editing in the latent space
+   - Training Process:
+     * Forward Diffusion: Gradually adds noise to images
+     * Reverse Diffusion: Learns to denoise images with text conditioning
+     * Loss: Mean Squared Error between predicted and actual noise
+   - Why it's needed:
+     * Handles the progressive generation of new text
+     * Maintains consistency with surrounding context
+     * Provides fine-grained control over the editing process
+
+Training Strategy:
+-----------------
+1. VAE Training (train_vae.py):
+   - Trained first to establish stable latent space
+   - Focuses on reconstruction quality
+   - Uses direct image-to-image comparison
+   - Frozen during UNet training
+   - Key hyperparameters:
+     * Lower learning rate (typically 1e-5)
+     * Smaller batch size
+     * MSE loss for pixel-level accuracy
+
+2. UNet Training (train_diffute_v1.py):
+   - Uses pre-trained VAE
+   - Implements diffusion-based training
+   - Incorporates text conditioning
+   - Key hyperparameters:
+     * Higher learning rate initially
+     * Noise scheduler configuration
+     * Text embedding integration
+
+Why Two Separate Models:
+-----------------------
+1. Separation of Concerns:
+   - VAE handles image compression/reconstruction
+   - UNet focuses on text generation/editing
+   - Each model can be optimized independently
+
+2. Computational Efficiency:
+   - VAE reduces dimensionality for faster processing
+   - UNet works in smaller latent space
+   - Enables real-time editing capabilities
+
+3. Quality Control:
+   - VAE ensures structural integrity
+   - UNet manages fine details and text generation
+   - Combined approach preserves image quality
+
+Implementation Details:
+----------------------
+1. Data Processing:
+   - Images are normalized to [-1, 1]
+   - Text regions are masked for targeted editing
+   - Resolution is standardized (typically 512x512)
+
+2. Training Pipeline:
+   - VAE training:
+     * Direct image reconstruction
+     * No text conditioning
+     * Frozen during inference
+   
+   - UNet training:
+     * Noise prediction in latent space
+     * Text conditioning via TrOCR
+     * Progressive denoising process
+
+3. Inference Process:
+   - User selects text region
+   - VAE encodes image to latent space
+   - UNet generates new text through denoising
+   - VAE decodes back to image space
+
+Key Features:
+------------
+1. Region-Specific Editing:
+   - Precise control over text areas
+   - Preserves surrounding context
+   - Smooth blending of edited regions
+
+2. Text Conditioning:
+   - TrOCR for text understanding
+   - Guided generation process
+   - Maintains text style consistency
+
+3. Quality Preservation:
+   - High-fidelity image reconstruction
+   - Clean text generation
+   - Seamless integration of edits
+
+Usage Notes:
+-----------
+- The VAE should be trained first and frozen
+- UNet training requires more computational resources
+- Text conditioning quality affects final results
+- Number of diffusion steps impacts generation quality
+
+Dependencies and Requirements:
+----------------------------
+- PyTorch: Deep learning framework
+- Diffusers: Diffusion model implementation
+- Transformers: Text processing
+- Accelerate: Distributed training
+- Additional utilities for image processing
+
 Detailed Process Overview:
 -------------------------
 1. Image and Region Selection
@@ -92,6 +213,54 @@ Note: The quality of results can depend on factors like:
 - Complexity of the background
 - Number of diffusion steps
 - Resolution of the input image
+
+TrOCR-UNet Integration:
+----------------------
+The system integrates TrOCR embeddings with the UNet through a sophisticated 
+cross-attention mechanism:
+
+1. Text Feature Extraction:
+   - Input text is rendered as an image using a standard font
+   - TrOCR processor prepares the image for the encoder
+   - TrOCR encoder generates embeddings [batch_size, sequence_length, hidden_size]
+   - Embeddings capture both semantic and style information
+
+2. UNet Conditioning Architecture:
+   - Cross-attention layers in UNet attend to text embeddings
+   - AdaIN layers modulate feature maps based on text style
+   - Embeddings guide the denoising process at each timestep
+   - Multi-modal fusion combines image and text information
+
+3. Information Flow:
+   - Text → TrOCR Encoder → Embeddings → UNet Cross-Attention
+   - Embeddings remain consistent during denoising steps
+   - Cross-attention selectively applies text features
+   - Progressive refinement guided by text condition
+
+4. Training Configuration:
+   - TrOCR encoder is frozen (requires_grad=False)
+   - UNet learns to interpret embeddings effectively
+   - Loss computed between noise predictions and targets
+   - Embeddings provide stable conditioning signal
+
+5. Input Processing:
+   - Latent input concatenates:
+     * Noisy image latents
+     * Binary mask for text region
+     * Masked image latents
+   - Text embeddings passed as separate conditioning
+
+Benefits of this Integration:
+- Precise control over text content and style
+- Stable generation guided by text features
+- Effective multi-modal fusion
+- Selective application of text information
+
+This architecture enables:
+- Accurate text content generation
+- Style consistency with input specification
+- Context-aware text placement
+- Smooth blending with background
 """
 
 import gradio as gr
@@ -895,11 +1064,32 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     """
     Main text editing pipeline that generates edited image with new text.
     
-    This function implements the core text editing pipeline:
-    1. Prepares input image and text region
-    2. Generates text mask
-    3. Applies diffusion model for text generation
-    4. Post-processes and combines results
+    This function demonstrates how the trained VAE and UNet work together:
+    
+    1. VAE's Role (AutoencoderKL):
+       - Converts high-dimensional images (H×W×3) to low-dimensional latents (h×w×4)
+       - Typically reduces spatial dimensions by factor of 8 (vae_scale_factor)
+       - Helps maintain global image structure during editing
+       - Uses deterministic encoding during inference
+    
+    2. UNet's Role:
+       - Works in the latent space created by VAE
+       - Performs denoising steps guided by:
+         * Text embeddings from TrOCR
+         * Masked image information
+         * Original image context
+       - Progressive refinement through multiple steps
+    
+    3. Diffusion Process:
+       - Starts with pure noise in the text region
+       - Each step gradually denoises and refines the text
+       - Uses noise_scheduler to manage the denoising schedule
+       - Number of steps controlled by slider_step parameter
+    
+    4. Text Conditioning:
+       - TrOCR generates embeddings from target text
+       - These embeddings guide the UNet's generation
+       - Helps maintain text style and appearance
     
     Args:
         text (str): New text to render in the image
@@ -911,7 +1101,23 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         tuple: (edited_image, mask) where:
             - edited_image (PIL.Image): Final image with edited text
             - mask (np.ndarray): Binary mask showing edited region
+    
+    Training Background:
+    -------------------
+    The models used here were trained in two stages:
+    
+    1. VAE Training:
+       - Trained to minimize reconstruction loss
+       - Learned to create efficient latent representations
+       - Now frozen and used only for encoding/decoding
+    
+    2. UNet Training:
+       - Trained on progressively noised images
+       - Learned to predict and remove noise
+       - Conditioned on text embeddings for guidance
+       - Uses masked regions for targeted editing
     """
+    # Initialize models and components
     examples = {}
     noise_scheduler_te = noise_scheduler
     processor_te = processor
@@ -919,17 +1125,19 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     vae_te = vae
     unet_te = unet
 
-    # Process text region coordinates
+    # Process text region coordinates and calculate dimensions
     bbox = [x0, y0, x1, y1]
     location = np.int32(bbox)
 
-    # Calculate dimensions for cropping
+    # Calculate crop dimensions based on text height
+    # This ensures appropriate context is captured for the diffusion process
     char_height = location[3] - location[1]
     char_lenth = location[2] - location[0]
     h, w, c = instance_image.shape
     short_side = min(h, w)
 
-    # Determine crop size based on text height
+    # Determine optimal crop size based on text height
+    # Larger text requires larger context window for better results
     if 6 * char_height < 128:
         CROP_LENTH = max(128, char_lenth)
     elif 6 * char_height < 256:
@@ -947,7 +1155,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     else:
         CROP_LENTH = 6 * char_height
 
-    # Adjust crop size based on text length and image dimensions
+    # Adjust final crop scale based on text length and image dimensions
     if char_lenth < CROP_LENTH:
         crop_scale = min(CROP_LENTH, short_side)
     else:
@@ -955,11 +1163,12 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
 
     _text_te, _ori_text = text, text
 
-    # Generate mask and prepare masked image
+    # Generate mask for the text region
+    # This mask guides the diffusion process to edit only the text area
     mask = generate_mask(instance_image.shape[:2][::-1], location)
     masked_image = prepare_mask_and_masked_image(instance_image, mask)
-    
-    # Calculate crop coordinates
+
+    # Calculate crop coordinates to focus on the text region
     x1, y1, x2, y2 = location
     if x2 - x1 < crop_scale:
         if x2 - crop_scale > 0:
@@ -982,12 +1191,17 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         y_s = np.random.randint(y1, max(0, y2 - crop_scale - 1))
 
     # Prepare images for processing
+    # 1. Render new text
     draw_ttf = draw_text(instance_image.shape[:2][::-1], text)
+    # 2. Crop relevant region from original image
     instance_image_1 = instance_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
+    # 3. Crop corresponding mask region
     mask_crop = mask[y_s : y_s + crop_scale, x_s : x_s + crop_scale]
+    # 4. Crop masked image region
     masked_image_crop = masked_image[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :]
 
-    # Apply image transformations
+    # Apply image transformations to prepare for model input
+    # These transformations were used during training
     augmented = image_trans_resize_and_crop(image=instance_image_1)
     instance_image_1 = augmented["image"]
     augmented = image_trans(image=instance_image_1)
@@ -1009,7 +1223,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     augmented = image_trans(image=draw_ttf)
     draw_ttf = augmented["image"]
 
-    # Store processed images
+    # Store processed images for potential debugging
     examples["ori_image"] = instance_image
     examples["instance_images"] = instance_image_1
     examples["mask"] = mask_crop
@@ -1018,6 +1232,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
     examples["crop_scale"] = crop_scale
 
     # Prepare tensors for model input
+    # Move to GPU and ensure correct format
     input_values = instance_image_1.unsqueeze(0)
     input_values = input_values.to(memory_format=torch.contiguous_format).float()
     input_values = input_values.cuda()
@@ -1031,18 +1246,20 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
 
     with torch.no_grad():
         # Generate text features using TrOCR
+        # These features guide the diffusion process
         pixel_values = processor_te(images=ttf_imgs, return_tensors="pt").pixel_values
         pixel_values = pixel_values.cuda()
         ocr_feature = trocr_model_te(pixel_values)
         ocr_embeddings = ocr_feature.last_hidden_state.detach()
 
-        # Prepare latent representations
+        # Convert images to latent space using VAE
         vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
         latents = vae_te.encode(input_values.to(weight_dtype)).latent_dist.sample()
         latents = latents * vae_te.config.scaling_factor
         torch.randn_like(latents)
 
         # Process mask for latent space
+        # Resize mask to match latent dimensions
         width, height, *_ = mask_crop.size()[::-1]
         mask_crop = torch.nn.functional.interpolate(
             mask_crop,
@@ -1062,32 +1279,35 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
             width // vae_scale_factor,
         )
 
-        # Initialize noise for diffusion
+        # Initialize noise for diffusion process
         latents = randn_tensor(
             shape, generator=torch.manual_seed(0), dtype=weight_dtype
         )
         latents = latents * noise_scheduler_te.init_noise_sigma
         latents = latents.cuda()
 
-        # Run diffusion process
+        # Set up diffusion process
         noise_scheduler_te.set_timesteps(int(slider_step))
         timesteps = noise_scheduler_te.timesteps
 
+        # Progressive denoising loop
         for i, t in enumerate(timesteps):
             # Prepare model input
             latent_model_input = latents
             latent_model_input = noise_scheduler_te.scale_model_input(
                 latent_model_input, t
             )
+            # Concatenate all inputs for UNet
             latent_model_input = torch.cat(
                 [latent_model_input, mask_crop, masked_image_latents], dim=1
             )
 
             # Generate noise prediction
             noise_pred = unet_te(latent_model_input, t, ocr_embeddings).sample
+            # Update latents using scheduler
             latents = noise_scheduler_te.step(noise_pred, t, latents).prev_sample
 
-        # Decode generated image
+        # Decode generated image from latents using VAE
         pred_latents = 1 / vae_te.config.scaling_factor * latents
         image_vae = vae_te.decode(pred_latents).sample
 
@@ -1096,7 +1316,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         image = image.cpu().permute(0, 2, 3, 1).float().detach().numpy()
         image = image.squeeze(0)
 
-        # Calculate final dimensions
+        # Calculate final dimensions for blending
         if y_s + crop_scale > h:
             r_h = h - y_s
         else:
@@ -1107,7 +1327,7 @@ def text_editing(text, instance_image, slider_step, x0, y0, x1, y1):
         else:
             r_w = crop_scale
 
-        # Combine generated image with original
+        # Blend generated image with original
         inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
         mid_inf_res = instance_image.cpu().permute(1, 2, 0).float().numpy().copy()
         mid_inf_res[y_s : y_s + crop_scale, x_s : x_s + crop_scale, :] = cv2.resize(
